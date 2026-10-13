@@ -52,6 +52,8 @@ export interface Settings {
   followVoice: boolean;
   /** Język rozpoznawania, znacznik BCP 47. */
   voiceLang: string;
+  /** Kompensacja opóźnienia rozpoznawania mowy, ms [H]: o tyle tekst wyprzedza ostatni rozpoznany wynik. */
+  voiceLatencyMs: number;
 }
 
 export const SETTINGS_KEY = "prompter.settings";
@@ -85,6 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mirrorPreview: true,
   followVoice: false,
   voiceLang: "pl-PL",
+  voiceLatencyMs: 1000,
 };
 
 export const FONT_STACKS: Record<FontChoice, string> = {

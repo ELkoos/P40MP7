@@ -306,6 +306,11 @@ export class EditorView {
             : support.reason,
         ),
         field("Język mowy", voiceLang),
+        field(
+          "Wyprzedzenie przy głosie",
+          range(s.voiceLatencyMs, 0, 2500, 100, (v) => (s.voiceLatencyMs = v), " ms"),
+          "Rozpoznawanie mowy ma opóźnienie. Czytasz dalej niż podświetlenie: zwiększ. Tekst ucieka do przodu: zmniejsz.",
+        ),
       ),
     );
   }

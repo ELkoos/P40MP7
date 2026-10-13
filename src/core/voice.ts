@@ -185,7 +185,14 @@ function distancePenalty(d: number): number {
 export interface VoiceFollowOptions {
   /** Stała czasowa wygładzania ruchu p, ms. */
   tauMs: number;
-  /** Maksymalne wyprzedzenie celu na podstawie tempa mówienia, w slotach (kompensuje opóźnienie rozpoznawania). */
+  /**
+   * Szacowane opóźnienie rozpoznawania, ms: wynik przychodzi, gdy lektor jest już dalej.
+   * Cel jest przesuwany o tempo mówienia × (opóźnienie + czas od ostatniego wyniku).
+   */
+  latencyMs: number;
+  /** Ile slotów ponad kompensację opóźnienia tekst może wyprzedzić ostatni wynik (przy ciszy). */
+  maxExtraLeadSlots: number;
+  /** Twardy limit wyprzedzenia, w slotach. */
   maxLeadSlots: number;
   /** Różnica, powyżej której p przeskakuje zamiast płynąć, w slotach. */
   snapSlots: number;
@@ -196,16 +203,21 @@ export interface VoiceFollowOptions {
 }
 
 export const DEFAULT_VOICE_FOLLOW: VoiceFollowOptions = {
-  tauMs: 250,
-  maxLeadSlots: 1,
+  tauMs: 150,
+  latencyMs: 1000,
+  maxExtraLeadSlots: 1,
+  maxLeadSlots: 6,
   snapSlots: 12,
   holdBackSlots: 2,
   maxDtMs: 100,
 };
 
+/** Najwyższe przyjmowane tempo mówienia, sloty na ms (20 słów/s). */
+const MAX_RATE = 0.02;
+
 /**
  * Prowadzenie pozycji p za lektorem: cel ustawiany przy każdym dopasowaniu, p dąży do niego płynnie.
- * Przy ciszy cel stoi, więc tekst się zatrzymuje (8.1).
+ * Przy ciszy cel stoi (po wyczerpaniu wyprzedzenia), więc tekst się zatrzymuje (8.1).
  */
 export class VoiceFollower {
   private target = 0;
@@ -213,18 +225,24 @@ export class VoiceFollower {
   /** Tempo mówienia w slotach na ms (średnia wykładnicza). */
   private rate = 0;
   private lastTick: number | null = null;
+  /** Czy od resetu był już wynik dopasowania; przed nim tekst stoi. */
+  private started = false;
   private readonly opt: VoiceFollowOptions;
 
   constructor(options: Partial<VoiceFollowOptions> = {}) {
     this.opt = { ...DEFAULT_VOICE_FOLLOW, ...options };
   }
 
-  /** Nowy punkt startu (start słuchania, nawigacja ręczna); zeruje tempo. */
-  reset(p: number, now: number): void {
+  /**
+   * Nowy punkt startu (start słuchania, nawigacja ręczna).
+   * `priorRate`: tempo startowe w slotach na ms (np. z ustawionej prędkości), zanim zmierzymy własne.
+   */
+  reset(p: number, now: number, priorRate = 0): void {
     this.target = p;
     this.lastAdvance = now;
-    this.rate = 0;
+    this.rate = Math.min(Math.max(0, priorRate), MAX_RATE);
     this.lastTick = null;
+    this.started = false;
   }
 
   /** Pozycja w slotach, do której lektor doszedł (początek następnego słowa do przeczytania). */
@@ -232,22 +250,26 @@ export class VoiceFollower {
     const delta = slot - this.target;
     if (delta > 0) {
       const dt = now - this.lastAdvance;
-      if (dt > 0 && delta < this.opt.snapSlots) {
-        const inst = Math.min(delta / dt, 0.02);
+      if (this.started && dt > 0 && delta < this.opt.snapSlots) {
+        const inst = Math.min(delta / dt, MAX_RATE);
         this.rate = this.rate === 0 ? inst : this.rate * 0.7 + inst * 0.3;
       }
       this.lastAdvance = now;
       this.target = slot;
+      this.started = true;
     } else if (-delta >= this.opt.holdBackSlots) {
       this.target = slot;
       this.lastAdvance = now;
-      this.rate = 0;
+      this.started = true;
     }
   }
 
-  /** Cel z wyprzedzeniem wynikającym z tempa mówienia. */
+  /** Cel z wyprzedzeniem: kompensacja opóźnienia rozpoznawania plus ruch od ostatniego wyniku. */
   goal(now: number): number {
-    const lead = Math.min(this.opt.maxLeadSlots, this.rate * Math.max(0, now - this.lastAdvance));
+    if (!this.started) return this.target;
+    const o = this.opt;
+    const latencyLead = this.rate * o.latencyMs;
+    const lead = Math.min(this.rate * (o.latencyMs + Math.max(0, now - this.lastAdvance)), latencyLead + o.maxExtraLeadSlots, o.maxLeadSlots);
     return this.target + lead;
   }
 
