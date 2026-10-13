@@ -91,6 +91,7 @@ export function tokenize(text: string, options: Partial<TokenizeOptions> = {}): 
 
   const tokens: Token[] = [];
   let sentenceStart = 0;
+  let sourceWord = 0;
 
   paragraphs.forEach((paragraph, paragraphIndex) => {
     const paragraphStart = tokens.length;
@@ -127,12 +128,14 @@ export function tokenize(text: string, options: Partial<TokenizeOptions> = {}): 
           ...flags,
           lineBreakAfter: last && word.lineBreakAfter,
           paragraphIndex,
+          sourceWord,
           sentenceStart,
           paragraphStart,
         });
       });
 
       if (sentenceEnd) sentenceStart = tokens.length;
+      sourceWord++;
     });
   });
 

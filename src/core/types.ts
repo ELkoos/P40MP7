@@ -13,6 +13,8 @@ export interface Token {
   /** Po tokenie był pojedynczy `\n` (miękkie złamanie wiersza w trybie A). */
   lineBreakAfter: boolean;
   paragraphIndex: number;
+  /** Numer słowa w tekście przed dzieleniem długich słów; pozwala zachować pozycję przy zmianie trybu. */
+  sourceWord: number;
   /** Indeks pierwszego tokenu zdania, do którego należy ten token. */
   sentenceStart: number;
   /** Indeks pierwszego tokenu akapitu, do którego należy ten token. */

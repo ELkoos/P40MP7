@@ -137,3 +137,14 @@ describe("scrollY (6.5)", () => {
     expect(columnOffset(300, 60, 40)).toBe(220);
   });
 });
+
+import { tokenIndexOfWord } from "../src/core/schedule";
+
+describe("tokenIndexOfWord", () => {
+  it("zwraca pierwszy token słowa źródłowego", () => {
+    const t = tokenize("Ala Konstantynopolitańczykiewiczówna kot", { splitLongWords: true });
+    expect(tokenIndexOfWord(t, 0)).toBe(0);
+    expect(tokenIndexOfWord(t, 1)).toBe(1);
+    expect(tokenIndexOfWord(t, 2)).toBe(5);
+  });
+});

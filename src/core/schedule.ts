@@ -44,3 +44,16 @@ export function remainingMs(schedule: Float64Array, p: number, wpm: number): num
   const end = schedule[schedule.length - 1]!;
   return (Math.max(0, end - p) * 60000) / wpm;
 }
+
+/** Indeks pierwszego tokenu należącego do danego słowa źródłowego (zmiana trybu, 4). */
+export function tokenIndexOfWord(tokens: readonly { sourceWord: number }[], word: number): number {
+  let lo = 0;
+  let hi = tokens.length - 1;
+  if (hi < 0) return -1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (tokens[mid]!.sourceWord < word) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}

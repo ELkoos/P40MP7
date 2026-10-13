@@ -2,25 +2,52 @@
 
 Autonomiczny prompter tekstu (PWA, offline, bez backendu). Projekt: [dokument projektowy](https://claude.ai/code/artifact/948bd202-2431-44b1-88ca-c3edb271063d).
 
-## Stan
+## Funkcje (wersja 0.1)
 
-Rdzeń bez DOM (sekcja 6 dokumentu), pokryty testami jednostkowymi:
+- Edytor z biblioteką tekstów zapisywaną lokalnie (IndexedDB), import .txt, zapamiętanie ostatniej pozycji.
+- Tryb A: przewijanie z linią odczytu w stałym miejscu ekranu.
+- Tryb B: jedno słowo, litera ORP zawsze w tym samym punkcie.
+- Prędkość 50–1000 słów/min, zmiana w trakcie bez skoku tekstu, rozbieg po starcie i pauzie, odliczanie.
+- Sterowanie: klawiatura, pilot prezentacyjny (PageUp, PageDown, B, kropka, F5), dotyk, przyciski na ekranie.
+- Pełny ekran, blokada wygaszania ekranu (Screen Wake Lock), praca offline po pierwszym otwarciu (Service Worker).
 
-| Plik | Zawartość | Sekcja |
-| --- | --- | --- |
-| `src/core/tokenizer.ts` | normalizacja, tokeny, flagi zdań i akapitów, wagi, dzielenie długich słów | 6.1, 6.2 |
-| `src/core/orp.ts` | punkt ORP, podział słowa, wyrównanie RSVP | 6.3, 6.6 |
-| `src/core/schedule.ts` | harmonogram w slotach, indeks i ułamek tokenu, czas do końca | 6.2 |
-| `src/core/clock.ts` | zegar odtwarzania, rozbieg, limit kroku, zmiana WPM bez skoku | 6.4 |
-| `src/core/navigation.ts` | poprzednie / następne zdanie i akapit | F-11 |
-| `src/core/scroll.ts` | pozycja przewijania y(p) w trybie A | 6.5 |
+## Sterowanie
 
-Interfejs (edytor, renderery, PWA) jeszcze nie istnieje.
+| Klawisz | Akcja |
+| --- | --- |
+| Spacja, Enter, B, kropka, F5 | Start / pauza |
+| Strzałka w górę / w dół | Prędkość +10 / −10 słów/min |
+| Strzałka w lewo / w prawo | Poprzednie / następne zdanie |
+| PageUp / PageDown | Poprzedni / następny akapit |
+| Home | Początek tekstu |
+| T | Zmiana trybu A / B |
+| F | Pełny ekran |
+| Escape | Powrót do edytora |
+
+Dotyk: stuknięcie = start / pauza, przesunięcie w górę lub w dół = prędkość, w lewo lub w prawo = zdanie.
 
 ## Uruchomienie
 
 ```
 npm install
-npm test
+npm run dev        # serwer deweloperski
+npm test           # testy jednostkowe rdzenia
 npm run typecheck
+npm run build      # wynik w dist/
+npm run preview    # podgląd zbudowanej wersji (z Service Workerem)
 ```
+
+Service Worker działa tylko przez HTTPS albo na `localhost`.
+
+## Publikacja na GitHub Pages
+
+Workflow `.github/workflows/pages.yml` publikuje `dist/` po każdym wypchnięciu na `main`. Jednorazowo trzeba włączyć: Settings → Pages → Source: GitHub Actions. Adres: `https://<właściciel>.github.io/<repozytorium>/`.
+
+## Struktura
+
+| Katalog | Zawartość |
+| --- | --- |
+| `src/core/` | Rdzeń bez DOM: tokenizer, ORP, harmonogram, zegar, nawigacja, przewijanie (sekcja 6 dokumentu) |
+| `src/app/` | Edytor, odtwarzacz, renderery trybów A i B, ustawienia, magazyn tekstów |
+| `public/` | Manifest PWA, ikona, Service Worker |
+| `test/` | Testy jednostkowe rdzenia (vitest) |

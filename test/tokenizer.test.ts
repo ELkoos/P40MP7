@@ -87,3 +87,10 @@ describe("ORP", () => {
     expect(orpCharIndex("–", 0)).toBe(-1);
   });
 });
+
+describe("sourceWord", () => {
+  it("kawałki długiego słowa mają ten sam numer słowa źródłowego", () => {
+    const t = tokenize("Ala Konstantynopolitańczykiewiczówna kot", { splitLongWords: true });
+    expect(t.map((x) => x.sourceWord)).toEqual([0, 1, 1, 1, 1, 2]);
+  });
+});
