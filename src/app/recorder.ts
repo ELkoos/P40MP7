@@ -125,6 +125,7 @@ export class RecordingController {
   private wakeLock: WakeLockLike | null = null;
   private preview: HTMLVideoElement;
   private badge: HTMLDivElement;
+  private stopBtn: HTMLButtonElement;
   private toast: HTMLDivElement;
 
   constructor(
@@ -142,10 +143,27 @@ export class RecordingController {
     this.badge = document.createElement("div");
     this.badge.className = "rec-badge";
     this.badge.setAttribute("role", "status");
+    // STOP zawsze widoczny w trakcie nagrywania, niezależnie od chowanego paska narzędzi,
+    // w dolnym rogu, z dala od linii odczytu przy kamerze.
+    // To element ekranu, nie obrazu z kamery, więc nie trafia do nagrania.
+    this.stopBtn = document.createElement("button");
+    this.stopBtn.type = "button";
+    this.stopBtn.className = "rec-stop";
+    this.stopBtn.textContent = "■ STOP";
+    this.stopBtn.title = "Zatrzymaj nagrywanie i zapisz plik (R)";
+    this.stopBtn.setAttribute("aria-label", "Zatrzymaj nagrywanie i zapisz plik");
+    this.stopBtn.hidden = true;
+    this.stopBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.stopBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.stopBtn.blur();
+      window.clearTimeout(this.tailTimer);
+      void this.stop();
+    });
     this.toast = document.createElement("div");
     this.toast.className = "rec-toast";
     this.toast.hidden = true;
-    host.append(this.preview, this.badge, this.toast);
+    host.append(this.preview, this.badge, this.stopBtn, this.toast);
 
     const reason = unsupportedReason();
     if (reason) this.setBadge(reason, "error");
@@ -326,6 +344,7 @@ export class RecordingController {
   private setBadge(text: string, kind: "idle" | "rec" | "error"): void {
     this.badge.textContent = text;
     this.badge.dataset.kind = kind;
+    this.stopBtn.hidden = kind !== "rec";
   }
 
   private async requestWakeLock(): Promise<void> {
