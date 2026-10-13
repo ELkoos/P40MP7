@@ -1,6 +1,7 @@
 import { buildSchedule, DEFAULT_RAMP, remainingMs, tokenize, wpmForDuration, WPM_MAX, WPM_MIN } from "../core";
 import { makeBackup, mergeScripts, parseBackup, safeFileName } from "./backup";
 import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey, type Command } from "./keys";
+import { durationFromParts } from "./duration";
 import { Player } from "./player";
 import { RecordingSettingsPanel } from "./recorder";
 import { saveSettings, wpmFor, type Settings } from "./settings";
@@ -38,15 +39,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
   Object.assign(e, props);
   e.append(...children);
   return e;
-}
-
-/** "3:30", "3.5" albo "3" (minuty) → ms; null, gdy nie da się odczytać. */
-export function parseDuration(text: string): number | null {
-  const t = text.trim().replace(",", ".");
-  const m = /^(\d+):([0-5]?\d)$/.exec(t);
-  if (m) return (Number(m[1]) * 60 + Number(m[2])) * 1000;
-  if (/^\d+(\.\d+)?$/.test(t)) return Number(t) * 60000;
-  return null;
 }
 
 function field(label: string, control: HTMLElement, hint?: string): HTMLLabelElement {
@@ -205,13 +197,21 @@ export class EditorView {
     });
 
     // Dopasowanie prędkości do zadanego czasu (porównanie z rynkiem: Teleprompter.com, Teleprompter Pro, PrompterPal).
-    const target = el("input", { type: "text", placeholder: "np. 3:30", inputMode: "decimal", size: 6 });
+    // Dwa pola z samymi cyframi: klawiatura numeryczna na telefonie nie ma znaku „:”.
+    const digits = (placeholder: string, maxLength: number, label: string) => {
+      const input = el("input", { type: "text", inputMode: "numeric", placeholder, maxLength, size: maxLength + 1 });
+      input.pattern = "[0-9]*";
+      input.setAttribute("aria-label", label);
+      return input;
+    };
+    const targetMin = digits("3", 3, "Minuty");
+    const targetSec = digits("30", 2, "Sekundy");
     const fitBtn = el("button", { type: "button", textContent: "Dopasuj prędkość" });
     const fitNote = el("span", { className: "field-hint" });
     const fit = () => {
-      const ms = parseDuration(target.value);
-      if (ms === null || ms <= 0) {
-        fitNote.textContent = "Podaj czas jako minuty:sekundy, np. 3:30, albo minuty, np. 2.5.";
+      const ms = durationFromParts(targetMin.value, targetSec.value);
+      if (ms === null) {
+        fitNote.textContent = "Podaj minuty i sekundy (0–59), same cyfry, np. 3 i 30.";
         return;
       }
       const tokens = tokenize(this.bodyInput.value, { splitLongWords: s.mode === "B" });
@@ -231,9 +231,11 @@ export class EditorView {
         : `Ustawiono ${v} słów/min. Czas liczony od początku tekstu, z rozbiegiem, bez odliczania i pauz.`;
     };
     fitBtn.addEventListener("click", fit);
-    target.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") fit();
-    });
+    for (const input of [targetMin, targetSec]) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") fit();
+      });
+    }
 
     const range = (value: number, min: number, max: number, step: number, set: (v: number) => void, unit: string) => {
       const input = el("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(value) });
@@ -301,7 +303,7 @@ export class EditorView {
         { className: "settings-grid" },
         field("Tryb", mode),
         field("Prędkość, słów/min", wpm, `Zakres ${WPM_MIN}–${WPM_MAX}; osobno dla każdego trybu`),
-        withNote(field("Czas docelowy, min:s", el("span", { className: "range" }, target, fitBtn)), fitNote),
+        withNote(field("Czas docelowy", el("span", { className: "duration" }, targetMin, "min", targetSec, "s", fitBtn)), fitNote),
         field("Punkt odczytu od góry", range(s.focusPct, 10, 90, 1, (v) => (s.focusPct = v), "%"), "Bliżej kamery = wyżej"),
         field("Rozmiar czcionki, px", fontSize, "Puste = auto (48 px, na wąskim ekranie 32 px)"),
         field("Interlinia", range(s.lineHeight, 1.1, 2, 0.1, (v) => (s.lineHeight = v), "")),

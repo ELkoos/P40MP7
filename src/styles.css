@@ -406,6 +406,19 @@ details[open] > summary::after {
   min-width: 0;
 }
 
+.duration {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.field .duration input[type="text"] {
+  width: 4.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .range output {
   min-width: 56px;
   text-align: right;
