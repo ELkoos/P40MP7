@@ -11,6 +11,7 @@ import {
   tokenize,
   type Token,
 } from "../core";
+import { RecordingController } from "./recorder";
 import { RsvpRenderer, ScrollRenderer, type Renderer } from "./renderers";
 import { saveSettings, wpmFor, type Settings } from "./settings";
 
@@ -25,6 +26,8 @@ export type Command =
   | "home"
   | "fullscreen"
   | "switchMode"
+  | "record"
+  | "preview"
   | "exit";
 
 const WPM_STEP = 10;
@@ -61,6 +64,12 @@ export function commandForKey(e: KeyboardEvent): Command | null {
     case "t":
     case "T":
       return "switchMode";
+    case "r":
+    case "R":
+      return "record";
+    case "p":
+    case "P":
+      return "preview";
     case "Escape":
       return "exit";
     default:
@@ -98,6 +107,8 @@ export class Player {
   private resizeObserver: ResizeObserver;
   private lastInfo = "";
   private pointerStart: { x: number; y: number; t: number } | null = null;
+  private rec: RecordingController | null = null;
+  private finishedSeen = false;
 
   constructor(
     private host: HTMLElement,
@@ -105,6 +116,7 @@ export class Player {
     startWord: number,
     private settings: Settings,
     private onExit: (lastWord: number) => void,
+    title = "",
   ) {
     this.el = document.createElement("div");
     this.el.className = `player theme-${settings.theme}`;
@@ -120,6 +132,7 @@ export class Player {
     this.hud.append(this.hudInfo, this.buildToolbar());
     this.el.append(this.stage, this.overlay, this.hud);
     host.appendChild(this.el);
+    if (settings.record) this.rec = new RecordingController(this.el, settings, title);
 
     this.build(startWord);
 
@@ -147,6 +160,7 @@ export class Player {
       ["+", "Szybciej", "faster"],
       ["⏭", "Następne zdanie", "nextSentence"],
       ["A/B", "Zmień tryb", "switchMode"],
+      ...(this.settings.record ? ([["●", "Nagrywanie start / stop (R)", "record"]] as [string, string, Command][]) : []),
       ["⛶", "Pełny ekran", "fullscreen"],
       ["✕", "Wyjdź do edytora", "exit"],
     ];
@@ -174,10 +188,11 @@ export class Player {
     this.clock = new PlaybackClock(end, { wpm: wpmFor(this.settings), rampMs: this.settings.rampMs });
     const i = Math.max(0, tokenIndexOfWord(this.tokens, startWord));
     if (this.tokens.length > 0) this.clock.seek(this.schedule[i]!);
+    const view = RecordingController.viewSettings(this.settings);
     this.renderer =
       this.settings.mode === "A"
-        ? new ScrollRenderer(this.stage, this.tokens, this.schedule, this.settings)
-        : new RsvpRenderer(this.stage, this.tokens, this.settings);
+        ? new ScrollRenderer(this.stage, this.tokens, this.schedule, view)
+        : new RsvpRenderer(this.stage, this.tokens, view);
   }
 
   private currentWord(): number {
@@ -190,6 +205,12 @@ export class Player {
     const i = tokenIndexAt(this.schedule, p);
     if (i >= 0) this.renderer?.draw(i, p);
     if (this.clock.state === "finished" && this.wakeLock) this.releaseWakeLock();
+    if (this.rec) {
+      const finished = this.clock.state === "finished";
+      if (finished && !this.finishedSeen) this.rec.finished();
+      this.finishedSeen = finished;
+      this.rec.setPlaying(this.clock.state === "playing" || this.counting);
+    }
     this.updateHud(now);
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
@@ -258,6 +279,12 @@ export class Player {
         this.build(word);
         break;
       }
+      case "record":
+        this.rec?.toggle();
+        break;
+      case "preview":
+        this.rec?.togglePreview();
+        break;
       case "exit":
         this.exit();
         break;
@@ -266,6 +293,7 @@ export class Player {
 
   private startWithCountdown(): void {
     if (this.tokens.length === 0) return;
+    this.rec?.countdownStarted();
     let left = this.settings.countdownS;
     if (left <= 0) {
       this.play();
@@ -375,6 +403,8 @@ export class Player {
     this.releaseWakeLock();
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => undefined);
     this.renderer?.destroy();
+    // Trwające nagranie zostaje zapisane do pliku także po wyjściu z odtwarzacza.
+    void this.rec?.destroy();
     this.el.remove();
   }
 }
