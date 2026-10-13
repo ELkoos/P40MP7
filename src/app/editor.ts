@@ -1,5 +1,6 @@
 import { buildSchedule, remainingMs, tokenize, WPM_MAX, WPM_MIN } from "../core";
 import { Player } from "./player";
+import { RecordingSettingsPanel } from "./recorder";
 import { saveSettings, wpmFor, type Settings } from "./settings";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
 
@@ -32,6 +33,7 @@ export class EditorView {
   private script: Script | null = null;
   private saveTimer = 0;
   private settingsEl: HTMLElement;
+  private recordingPanel: RecordingSettingsPanel;
 
   constructor(
     private host: HTMLElement,
@@ -99,6 +101,7 @@ export class EditorView {
         this.bodyInput,
         el("div", { className: "actions" }, startBtn, importBtn, deleteBtn, fileInput, this.estimate),
         (this.settingsEl = this.buildSettings()),
+        (this.recordingPanel = new RecordingSettingsPanel(settings)).el,
         el(
           "details",
           { className: "help" },
@@ -111,6 +114,7 @@ export class EditorView {
             el("li", { textContent: "Strzałka w lewo i w prawo: poprzednie i następne zdanie" }),
             el("li", { textContent: "PageUp i PageDown: poprzedni i następny akapit" }),
             el("li", { textContent: "Home: początek; T: zmiana trybu; F: pełny ekran; Escape: edytor" }),
+            el("li", { textContent: "Przy nagrywaniu: R = nagrywanie start i stop, P = podgląd kamery" }),
             el("li", { textContent: "Dotyk: stuknięcie = start i pauza, przesunięcie w górę lub w dół = prędkość, w lewo lub w prawo = zdanie" }),
           ),
         ),
@@ -309,6 +313,7 @@ export class EditorView {
     if (this.bodyInput.value.trim() === "") return;
     // Pełny ekran musi być wywołany synchronicznie w obsłudze gestu użytkownika (F-17).
     this.host.requestFullscreen?.().catch(() => undefined);
+    this.recordingPanel.stopPreview();
     await this.saveNow();
     const s = this.script!;
     this.root.hidden = true;
@@ -321,6 +326,6 @@ export class EditorView {
       this.settingsEl.replaceWith(fresh);
       this.settingsEl = fresh;
       this.updateEstimate();
-    });
+    }, s.title);
   }
 }

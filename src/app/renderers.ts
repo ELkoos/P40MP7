@@ -1,3 +1,4 @@
+import { clampedCenterPx } from "../core/recording";
 import { columnOffset, scrollY, splitAtOrp, rsvpLeftEdge, type MeasuredLine, type Token } from "../core";
 import { FONT_STACKS, effectiveFontSize, type Settings } from "./settings";
 
@@ -74,6 +75,7 @@ export class ScrollRenderer implements Renderer {
   layout(): void {
     this.lineHeightPx = parseFloat(getComputedStyle(this.column).lineHeight) || effectiveFontSize(this.settings) * this.settings.lineHeight;
     this.focus = focusPx(this.stage, this.settings);
+    this.column.style.left = `${clampedCenterPx(this.settings.anchorPct, this.stage.clientWidth, this.column.offsetWidth, 16)}px`;
     const lines: MeasuredLine[] = [];
     let lastTop = Number.NEGATIVE_INFINITY;
     this.spans.forEach((span, i) => {
@@ -153,7 +155,7 @@ export class RsvpRenderer implements Renderer {
   }
 
   layout(): void {
-    this.anchorX = this.stage.clientWidth / 2;
+    this.anchorX = (this.stage.clientWidth * this.settings.anchorPct) / 100;
     this.focus = focusPx(this.stage, this.settings);
     const size = effectiveFontSize(this.settings);
     this.ticks.style.left = `${this.anchorX}px`;
