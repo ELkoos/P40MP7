@@ -183,49 +183,62 @@ function distancePenalty(d: number): number {
 
 /** Wartości [H]. */
 export interface VoiceFollowOptions {
-  /** Stała czasowa wygładzania ruchu p, ms. */
-  tauMs: number;
-  /**
-   * Szacowane opóźnienie rozpoznawania, ms: wynik przychodzi, gdy lektor jest już dalej.
-   * Cel jest przesuwany o tempo mówienia × (opóźnienie + czas od ostatniego wyniku).
-   */
+  /** Szacowane opóźnienie rozpoznawania, ms: o tyle tempa mowy tekst wyprzedza ostatni wynik. */
   latencyMs: number;
-  /** Ile slotów ponad kompensację opóźnienia tekst może wyprzedzić ostatni wynik (przy ciszy). */
+  /** Okno pomiaru tempa mowy, ms: tempo = przyrost wyników w tym oknie / czas. */
+  rateWindowMs: number;
+  /** Czas, w którym korekta zbiera różnicę między pozycją a celem, ms (większy = łagodniej). */
+  correctionMs: number;
+  /** Stała czasowa zmian prędkości przewijania, ms (bez szarpnięć). */
+  velocityTauMs: number;
+  /** Po tylu ms bez nowego wyniku uznajemy ciszę: cel przestaje rosnąć, tekst dojeżdża i staje. */
+  silenceMs: number;
+  /** Po tylu ms bez nowego wyniku tekst wraca łagodnie do ostatniego rozpoznanego słowa (lektor skończył). */
+  rewindAfterMs: number;
+  /** Ile slotów ponad kompensację opóźnienia tekst może wyprzedzić wynik, gdy kolejny się spóźnia. */
   maxExtraLeadSlots: number;
-  /** Twardy limit wyprzedzenia, w slotach. */
-  maxLeadSlots: number;
-  /** Różnica, powyżej której p przeskakuje zamiast płynąć, w slotach. */
+  /** Najwyższa prędkość jako wielokrotność zmierzonego tempa (dogonienie po zaległości). */
+  maxSpeedup: number;
+  /** Różnica, powyżej której p przeskakuje (lektor przeskoczył fragment), w slotach. */
   snapSlots: number;
-  /** Cofnięcie celu mniejsze niż tyle slotów jest ignorowane (poprawki wyników pośrednich). */
-  holdBackSlots: number;
   /** Limit kroku czasu, ms. */
   maxDtMs: number;
 }
 
 export const DEFAULT_VOICE_FOLLOW: VoiceFollowOptions = {
-  tauMs: 150,
   latencyMs: 1000,
-  maxExtraLeadSlots: 1,
-  maxLeadSlots: 6,
+  rateWindowMs: 4000,
+  correctionMs: 1500,
+  velocityTauMs: 400,
+  silenceMs: 1500,
+  rewindAfterMs: 2500,
+  maxExtraLeadSlots: 2,
+  maxSpeedup: 1.8,
   snapSlots: 12,
-  holdBackSlots: 2,
   maxDtMs: 100,
 };
 
-/** Najwyższe przyjmowane tempo mówienia, sloty na ms (20 słów/s). */
-const MAX_RATE = 0.02;
+/** Najwyższe przyjmowane tempo mówienia, sloty na ms (10 słów/s). */
+const MAX_RATE = 0.01;
 
 /**
- * Prowadzenie pozycji p za lektorem: cel ustawiany przy każdym dopasowaniu, p dąży do niego płynnie.
- * Przy ciszy cel stoi (po wyczerpaniu wyprzedzenia), więc tekst się zatrzymuje (8.1).
+ * Prowadzenie pozycji p za lektorem jak operator promptera: tekst przesuwa się płynnie z prędkością
+ * równą zmierzonemu tempu mowy, a różnica względem rozpoznanej pozycji jest zbierana łagodnie przez
+ * zmianę prędkości, nie skokiem. Wyniki rozpoznawania przychodzą paczkami (kilka słów naraz),
+ * więc ustawianie pozycji wprost na wynik dawało przeskoki.
+ * Przy ciszy cel przestaje rosnąć i tekst zatrzymuje się (8.1), wracając łagodnie o wyprzedzenie,
+ * jeśli lektor skończył wcześniej. W trakcie mowy tekst się nie cofa; tylko duża różnica (skok lektora)
+ * przestawia pozycję od razu.
  */
 export class VoiceFollower {
+  /** Ostatnia rozpoznana pozycja (początek słowa do przeczytania). */
   private target = 0;
   private lastAdvance = 0;
-  /** Tempo mówienia w slotach na ms (średnia wykładnicza). */
-  private rate = 0;
+  /** Historia wyników do pomiaru tempa: [czas, cel]. */
+  private history: [number, number][] = [];
+  private priorRate = 0;
+  private velocity = 0;
   private lastTick: number | null = null;
-  /** Czy od resetu był już wynik dopasowania; przed nim tekst stoi. */
   private started = false;
   private readonly opt: VoiceFollowOptions;
 
@@ -240,48 +253,89 @@ export class VoiceFollower {
   reset(p: number, now: number, priorRate = 0): void {
     this.target = p;
     this.lastAdvance = now;
-    this.rate = Math.min(Math.max(0, priorRate), MAX_RATE);
+    this.history = [];
+    this.priorRate = Math.min(Math.max(0, priorRate), MAX_RATE);
+    this.velocity = 0;
     this.lastTick = null;
     this.started = false;
   }
 
   /** Pozycja w slotach, do której lektor doszedł (początek następnego słowa do przeczytania). */
   setTarget(slot: number, now: number): void {
-    const delta = slot - this.target;
-    if (delta > 0) {
-      const dt = now - this.lastAdvance;
-      if (this.started && dt > 0 && delta < this.opt.snapSlots) {
-        const inst = Math.min(delta / dt, MAX_RATE);
-        this.rate = this.rate === 0 ? inst : this.rate * 0.7 + inst * 0.3;
-      }
-      this.lastAdvance = now;
+    if (slot > this.target) {
+      if (slot - this.target >= this.opt.snapSlots) this.history = [];
       this.target = slot;
+      this.lastAdvance = now;
+      this.history.push([now, slot]);
       this.started = true;
-    } else if (-delta >= this.opt.holdBackSlots) {
+    } else if (this.target - slot >= this.opt.snapSlots) {
+      // Lektor wrócił daleko wstecz: nowy początek pomiaru.
       this.target = slot;
       this.lastAdvance = now;
+      this.history = [[now, slot]];
       this.started = true;
     }
+    // Drobne cofnięcia (poprawki wyników pośrednich) pomijamy.
   }
 
-  /** Cel z wyprzedzeniem: kompensacja opóźnienia rozpoznawania plus ruch od ostatniego wyniku. */
+  /** Tempo mowy, sloty na ms: przyrost wyników w oknie; przed pomiarem tempo startowe. */
+  rate(now: number): number {
+    const from = now - this.opt.rateWindowMs;
+    while (this.history.length > 2 && this.history[0]![0] < from) this.history.shift();
+    const h = this.history;
+    if (h.length >= 2) {
+      const dt = h[h.length - 1]![0] - h[0]![0];
+      if (dt >= 800) return Math.min(MAX_RATE, (h[h.length - 1]![1] - h[0]![1]) / dt);
+    }
+    return this.priorRate;
+  }
+
+  /** Gdzie powinien być tekst: ostatni wynik + to, co lektor powiedział od tamtej chwili (do ciszy). */
   goal(now: number): number {
     if (!this.started) return this.target;
-    const o = this.opt;
-    const latencyLead = this.rate * o.latencyMs;
-    const lead = Math.min(this.rate * (o.latencyMs + Math.max(0, now - this.lastAdvance)), latencyLead + o.maxExtraLeadSlots, o.maxLeadSlots);
-    return this.target + lead;
+    const since = Math.max(0, now - this.lastAdvance);
+    // Cisza: wyniki przestały rosnąć, więc lektor skończył na ostatnim rozpoznanym słowie.
+    if (since > this.opt.silenceMs) return this.target;
+    // W trakcie mowy: wynik obejmuje tylko słowa skończone (lektor jest średnio w połowie następnego)
+    // i jest spóźniony o opóźnienie rozpoznawania plus czas od jego nadejścia; gdy kolejny wynik się spóźnia,
+    // tekst wyprzedza najwyżej o maxExtraLeadSlots ponad kompensację.
+    const rate = this.rate(now);
+    const latencyLead = rate * this.opt.latencyMs;
+    return this.target + 0.5 + Math.min(rate * (this.opt.latencyMs + since), latencyLead + this.opt.maxExtraLeadSlots);
   }
 
   /** Wywoływane w każdej klatce; zwraca nowe p. */
   tick(now: number, p: number): number {
-    const dt = this.lastTick === null ? 0 : Math.min(Math.max(0, now - this.lastTick), this.opt.maxDtMs);
+    const o = this.opt;
+    const dt = this.lastTick === null ? 0 : Math.min(Math.max(0, now - this.lastTick), o.maxDtMs);
     this.lastTick = now;
+    if (!this.started) return p;
     const g = this.goal(now);
     const diff = g - p;
-    if (Math.abs(diff) >= this.opt.snapSlots) return g;
-    // Drobne cofnięcia celu nie cofają tekstu.
-    if (diff < 0 && -diff < this.opt.holdBackSlots) return p;
-    return p + diff * (1 - Math.exp(-dt / this.opt.tauMs));
+    if (Math.abs(diff) >= o.snapSlots) {
+      this.velocity = 0;
+      return g;
+    }
+    const rate = this.rate(now);
+    const silent = now - this.lastAdvance > o.silenceMs;
+    const rewind = now - this.lastAdvance > o.rewindAfterMs;
+    const maxSpeed = Math.max(rate, this.priorRate) * o.maxSpeedup;
+    let want: number;
+    if (rewind && diff < -1) {
+      // Lektor przestał mówić, a tekst pojechał dalej o wyprzedzenie: łagodny powrót do miejsca, gdzie skończył.
+      want = Math.max(diff / o.correctionMs, -maxSpeed);
+    } else if (diff <= 0 || (silent && diff < 0.1)) {
+      want = 0;
+    } else {
+      // Tempo mowy (poza ciszą) plus łagodna korekta różnicy.
+      want = Math.min((silent ? 0 : rate) + diff / o.correctionMs, maxSpeed);
+    }
+    this.velocity += (want - this.velocity) * (1 - Math.exp(-dt / o.velocityTauMs));
+    // Zatrzymanie do zera zamiast nieskończenie wolnego pełzania.
+    if (want === 0 && Math.abs(this.velocity) < 1e-5) this.velocity = 0;
+    const next = p + this.velocity * dt;
+    // Nie mijamy celu w żadnym kierunku; w trakcie mowy tekst nie cofa się.
+    if (this.velocity >= 0) return Math.min(next, Math.max(p, g));
+    return Math.max(next, Math.min(p, g));
   }
 }

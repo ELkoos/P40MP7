@@ -82,83 +82,99 @@ describe("VoiceMatcher", () => {
 });
 
 describe("VoiceFollower", () => {
-  it("dąży płynnie do celu i nie przekracza go o więcej niż wyprzedzenie", () => {
-    const f = new VoiceFollower({ tauMs: 100, maxLeadSlots: 1 });
-    f.reset(0, 0);
-    f.setTarget(3, 0);
-    let p = 0;
-    let prev = 0;
-    for (let t = 0; t <= 2000; t += 16) {
-      p = f.tick(t, p);
-      expect(p).toBeGreaterThanOrEqual(prev);
-      prev = p;
-    }
-    expect(p).toBeGreaterThan(2.9);
-    expect(p).toBeLessThanOrEqual(4);
-  });
-
-  it("przy ciszy tekst stoi", () => {
-    const f = new VoiceFollower({ tauMs: 100 });
-    f.reset(5, 0);
-    let p = 5;
-    for (let t = 0; t <= 3000; t += 16) p = f.tick(t, p);
-    expect(p).toBe(5);
-  });
-
-  it("ignoruje drobne cofnięcia celu, a duże skoki wykonuje od razu", () => {
-    const f = new VoiceFollower({ tauMs: 100, snapSlots: 12, holdBackSlots: 2 });
-    f.reset(10, 0);
-    f.setTarget(9, 100);
-    expect(f.tick(200, 10)).toBe(10);
-    f.setTarget(40, 300);
-    expect(f.tick(316, 10)).toBe(40);
-  });
-
-  it("kompensuje opóźnienie rozpoznawania: cel wyprzedza ostatni wynik o tempo × opóźnienie", () => {
-    const f = new VoiceFollower({ latencyMs: 1000, maxExtraLeadSlots: 1, maxLeadSlots: 6 });
-    f.reset(0, 0);
-    f.setTarget(1, 400); // pierwszy wynik: bez pomiaru tempa
-    f.setTarget(2, 800); // 1 slot / 400 ms
-    expect(f.goal(800)).toBeCloseTo(2 + 2.5); // 1000 ms opóźnienia = 2,5 slotu
-    expect(f.goal(1000)).toBeCloseTo(2 + 3); // + 200 ms od wyniku
-    expect(f.goal(5000)).toBeCloseTo(2 + 3.5); // cisza: najwyżej 1 slot ponad kompensację
-  });
-
-  it("tempo startowe z ustawionej prędkości daje wyprzedzenie od pierwszego wyniku", () => {
-    const f = new VoiceFollower({ latencyMs: 1000 });
-    f.reset(0, 0, 150 / 60000); // 150 słów/min
-    expect(f.goal(0)).toBe(0); // przed pierwszym wynikiem tekst stoi
-    f.setTarget(3, 2000);
-    expect(f.goal(2000)).toBeCloseTo(3 + 2.5);
-  });
-
-  it("wyprzedzenie ma twardy limit, a bez kompensacji zachowuje się jak dawniej", () => {
-    const fast = new VoiceFollower({ latencyMs: 2500, maxLeadSlots: 4 });
-    fast.reset(0, 0, 0.01);
-    fast.setTarget(1, 100);
-    expect(fast.goal(100)).toBeCloseTo(1 + 4);
-    const none = new VoiceFollower({ latencyMs: 0, maxExtraLeadSlots: 1 });
-    none.reset(0, 0);
-    none.setTarget(1, 400);
-    none.setTarget(2, 800);
-    expect(none.goal(800)).toBeCloseTo(2);
-    expect(none.goal(5000)).toBeCloseTo(3);
-  });
-
-  it("symulacja: lektor 150 sł./min, wyniki 1 s po słowie; tekst nadąża za lektorem", () => {
-    const f = new VoiceFollower({ latencyMs: 1000 });
+  /** Lektor 150 sł./min; wyniki co 500–900 ms paczkami, z opóźnieniem 700–1300 ms (deterministycznie). */
+  function simulate(f: VoiceFollower, untilMs: number, stopSpeakingAt = Infinity, longGaps = false) {
     const rate = 150 / 60000;
-    f.reset(0, 0, rate);
+    const spokenAt = (t: number) => Math.min(t, stopSpeakingAt) * rate;
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    let nextResult = 600;
     let p = 0;
-    let worst = 0;
-    for (let t = 0; t <= 20000; t += 16) {
-      // Słowo k jest wypowiedziane w chwili k/rate; wynik przychodzi 1 s później, cel = k + 1.
-      const recognized = Math.floor((t - 1000) * rate);
-      if (recognized >= 0) f.setTarget(recognized + 1, t);
+    const out: { t: number; p: number; spoken: number }[] = [];
+    for (let t = 0; t <= untilMs; t += 16) {
+      if (t >= nextResult) {
+        const latency = 700 + rnd() * 600;
+        const heard = Math.floor(spokenAt(Math.max(0, t - latency)));
+        if (heard > 0) f.setTarget(heard, t);
+        // longGaps: co trzeci wynik spóźniony do 1,2–1,6 s (nieregularne paczki usługi).
+        nextResult = t + (longGaps && rnd() < 0.33 ? 1200 + rnd() * 400 : 500 + rnd() * 400);
+      }
       p = f.tick(t, p);
-      if (t > 3000) worst = Math.max(worst, t * rate - p);
+      out.push({ t, p, spoken: spokenAt(t) });
     }
-    // Bez kompensacji (stare ustawienia) zaległość wynosi ok. 2,1 słowa; z kompensacją poniżej 1 słowa.
-    expect(worst).toBeLessThan(1);
+    return out;
+  }
+
+  it("płynnie: wyniki paczkami nie dają przeskoków", () => {
+    const f = new VoiceFollower({ latencyMs: 1000 });
+    f.reset(0, 0, 150 / 60000);
+    const run = simulate(f, 30000);
+    let maxStep = 0;
+    for (let k = 1; k < run.length; k++) maxStep = Math.max(maxStep, run[k]!.p - run[k - 1]!.p);
+    // 150 sł./min to 0,04 słowa na klatkę 16 ms; limit przyspieszenia 1,8×.
+    expect(maxStep).toBeLessThan(0.08);
+  });
+
+  it("nieregularne wyniki w trakcie mowy nie cofają tekstu i nie dają przeskoków", () => {
+    const f = new VoiceFollower({ latencyMs: 1000 });
+    f.reset(0, 0, 150 / 60000);
+    const run = simulate(f, 30000, Infinity, true);
+    let maxStep = 0;
+    let minStep = 0;
+    for (let k = 1; k < run.length; k++) {
+      maxStep = Math.max(maxStep, run[k]!.p - run[k - 1]!.p);
+      minStep = Math.min(minStep, run[k]!.p - run[k - 1]!.p);
+    }
+    expect(maxStep).toBeLessThan(0.08);
+    expect(minStep).toBe(0);
+  });
+
+  it("nadąża za lektorem: po rozbiegu średnio mniej niż 1 słowo różnicy", () => {
+    const f = new VoiceFollower({ latencyMs: 1000 });
+    f.reset(0, 0, 150 / 60000);
+    const run = simulate(f, 30000).filter((r) => r.t > 5000);
+    const mean = run.reduce((a, r) => a + Math.abs(r.spoken - r.p), 0) / run.length;
+    const worst = Math.max(...run.map((r) => Math.abs(r.spoken - r.p)));
+    expect(mean).toBeLessThan(1);
+    expect(worst).toBeLessThan(2);
+  });
+
+  it("przy ciszy tekst dojeżdża i staje", () => {
+    const f = new VoiceFollower({ latencyMs: 1000 });
+    f.reset(0, 0, 150 / 60000);
+    const run = simulate(f, 26000, 10000);
+    const at = (t: number) => run.find((r) => r.t >= t)!.p;
+    expect(at(25000)).toBe(at(20000));
+    // Po ciszy tekst wraca łagodnie do miejsca, gdzie lektor skończył (25 słów).
+    expect(Math.abs(at(25000) - 10000 * (150 / 60000))).toBeLessThan(1);
+    let minStep = 0;
+    for (let k = 1; k < run.length; k++) minStep = Math.min(minStep, run[k]!.p - run[k - 1]!.p);
+    expect(minStep).toBeGreaterThan(-0.08);
+  });
+
+  it("przed pierwszym wynikiem tekst stoi; drobne cofnięcia nie cofają tekstu", () => {
+    const f = new VoiceFollower();
+    f.reset(5, 0, 0.0025);
+    let p = 5;
+    for (let t = 0; t <= 2000; t += 16) p = f.tick(t, p);
+    expect(p).toBe(5);
+    f.setTarget(8, 2000);
+    for (let t = 2016; t <= 2600; t += 16) p = f.tick(t, p);
+    const before = p;
+    f.setTarget(6, 2600);
+    for (let t = 2616; t <= 3200; t += 16) p = f.tick(t, p);
+    expect(p).toBeGreaterThanOrEqual(before);
+  });
+
+  it("duży skok lektora przestawia tekst od razu", () => {
+    const f = new VoiceFollower({ snapSlots: 12 });
+    f.reset(10, 0);
+    f.setTarget(11, 100);
+    f.setTarget(40, 300);
+    expect(f.tick(316, 10)).toBeGreaterThanOrEqual(40);
+    f.setTarget(5, 400);
+    const back = f.tick(416, 40);
+    expect(back).toBeGreaterThanOrEqual(5);
+    expect(back).toBeLessThan(6);
   });
 });
