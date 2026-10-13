@@ -8,7 +8,7 @@ Autonomiczny prompter tekstu (PWA, offline, bez backendu). Projekt: [dokument pr
 - Tryb A: przewijanie z linią odczytu w stałym miejscu ekranu.
 - Tryb B: jedno słowo, litera ORP zawsze w tym samym punkcie; w pauzie pod słowem widać całe zdanie z wyróżnionym bieżącym słowem.
 - Prędkość 50–1000 słów/min, zmiana w trakcie bez skoku tekstu, rozbieg po starcie i pauzie, odliczanie.
-- Dopasowanie prędkości do zadanego czasu (np. 3:30), z uwzględnieniem rozbiegu.
+- Dopasowanie prędkości do zadanego czasu (osobne pola minut i sekund, np. 3 i 30), z uwzględnieniem rozbiegu.
 - Sterowanie: klawiatura, pilot prezentacyjny (PageUp, PageDown, B, kropka, F5), dotyk, przyciski na ekranie.
 - Kopia całej biblioteki do pliku .json i import z niej (nowsza wersja tekstu wygrywa), pobranie bieżącego tekstu jako .txt.
 - Zmiana wyglądu w trakcie odtwarzania: czcionka, punkt odczytu, szerokość kolumny, bez zatrzymywania.
