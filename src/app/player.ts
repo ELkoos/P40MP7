@@ -211,10 +211,11 @@ export class Player {
     const p = this.clock.tick(now);
     const i = tokenIndexAt(this.schedule, p);
     if (i >= 0) this.renderer?.draw(i, p);
+    const listening = this.voice?.listener.listening ?? false;
+    this.renderer?.setPaused(this.clock.state !== "playing" && !this.counting && !listening);
     if (this.clock.state === "finished" && this.wakeLock) this.releaseWakeLock();
     if (this.rec) {
       // Przy podążaniu za głosem zegar stoi, więc koniec tekstu i „odtwarzanie” wynikają z pozycji i mikrofonu.
-      const listening = this.voice?.listener.listening ?? false;
       const finished = this.clock.state === "finished" || (listening && p >= this.schedule[this.tokens.length]!);
       if (finished && !this.finishedSeen) this.rec.finished();
       this.finishedSeen = finished;

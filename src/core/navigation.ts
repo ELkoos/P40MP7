@@ -38,3 +38,11 @@ export function nextParagraph(tokens: readonly Token[], schedule: Float64Array, 
   }
   return schedule[tokens.length]!;
 }
+
+/** Zakres tokenów [start, end] zdania zawierającego token i (podgląd kontekstu w trybie B). */
+export function sentenceRange(tokens: readonly Token[], i: number): [number, number] {
+  const start = tokens[i]!.sentenceStart;
+  let end = i;
+  while (end < tokens.length - 1 && tokens[end + 1]!.sentenceStart === start) end++;
+  return [start, end];
+}

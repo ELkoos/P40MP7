@@ -1,5 +1,5 @@
 import { clampedCenterPx } from "../core/recording";
-import { columnOffset, scrollY, splitAtOrp, rsvpLeftEdge, type MeasuredLine, type Token } from "../core";
+import { columnOffset, scrollY, sentenceRange, splitAtOrp, rsvpLeftEdge, type MeasuredLine, type Token } from "../core";
 import { FONT_STACKS, effectiveFontSize, type Settings } from "./settings";
 
 /** Wspólny interfejs obu trybów: renderer tylko odczytuje pozycję zegara (sekcja 5). */
@@ -7,6 +7,8 @@ export interface Renderer {
   /** Ponowny pomiar po zmianie rozmiaru, czcionki lub ustawień. */
   layout(): void;
   draw(i: number, p: number): void;
+  /** Wywoływane w każdej klatce: true, gdy odtwarzanie stoi (pauza, gotowość, koniec). */
+  setPaused(paused: boolean): void;
   destroy(): void;
 }
 
@@ -108,6 +110,8 @@ export class ScrollRenderer implements Renderer {
     }
   }
 
+  setPaused(): void {}
+
   destroy(): void {
     this.root.remove();
   }
@@ -122,6 +126,10 @@ export class RsvpRenderer implements Renderer {
   private suffix: HTMLSpanElement;
   private next: HTMLDivElement;
   private ticks: HTMLDivElement;
+  /** Zdanie wokół bieżącego słowa, widoczne tylko w pauzie (możliwość „cofnięcia wzroku”). */
+  private context: HTMLDivElement;
+  private paused = false;
+  private contextFor = -1;
   private ctx: CanvasRenderingContext2D | null;
   private widthCache = new Map<string, number>();
   private anchorX = 0;
@@ -148,7 +156,11 @@ export class RsvpRenderer implements Renderer {
     this.next.hidden = !settings.showNext;
     this.ticks = document.createElement("div");
     this.ticks.className = "orp-ticks";
-    this.root.append(this.ticks, this.word, this.next);
+    this.context = document.createElement("div");
+    this.context.className = "context";
+    this.context.hidden = true;
+    this.context.style.maxWidth = `${settings.columnCh}ch`;
+    this.root.append(this.ticks, this.word, this.next, this.context);
     stage.appendChild(this.root);
     this.ctx = document.createElement("canvas").getContext("2d");
     this.layout();
@@ -163,6 +175,7 @@ export class RsvpRenderer implements Renderer {
     this.ticks.style.height = `${size * 1.8}px`;
     this.word.style.top = `${this.focus}px`;
     this.next.style.top = `${this.focus + size * 1.2}px`;
+    this.context.style.top = `${this.focus + size * 1.2}px`;
     if (this.ctx) {
       const cs = getComputedStyle(this.word);
       this.ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
@@ -197,6 +210,52 @@ export class RsvpRenderer implements Renderer {
     if (this.settings.showNext) {
       this.next.textContent = this.tokens[i + 1]?.text ?? "";
       this.next.style.left = `${this.anchorX}px`;
+    }
+    if (this.paused) {
+      this.renderContext();
+      this.placeContext();
+    }
+  }
+
+  setPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    this.context.hidden = !paused;
+    this.next.hidden = paused || !this.settings.showNext;
+    if (paused) {
+      this.renderContext();
+      this.placeContext();
+    }
+  }
+
+  /** Kontekst pod słowem, wyśrodkowany na punkcie ORP (przy nagrywaniu może nie być środkiem ekranu). */
+  private placeContext(): void {
+    this.context.style.left = `${clampedCenterPx(this.settings.anchorPct, this.stage.clientWidth, this.context.offsetWidth, 16)}px`;
+  }
+
+  /** Całe zdanie z wyróżnionym bieżącym słowem; kawałki długich słów sklejone bez łącznika. */
+  private renderContext(): void {
+    const i = this.current;
+    if (i < 0 || i === this.contextFor) return;
+    this.contextFor = i;
+    const [start, end] = sentenceRange(this.tokens, i);
+    const cur = this.tokens[i]!.sourceWord;
+    this.context.replaceChildren();
+    let k = start;
+    while (k <= end) {
+      const word = this.tokens[k]!.sourceWord;
+      let text = "";
+      while (k <= end && this.tokens[k]!.sourceWord === word) {
+        const t = this.tokens[k]!.text;
+        const continued = k < end && this.tokens[k + 1]!.sourceWord === word;
+        text += continued && t.endsWith("-") ? t.slice(0, -1) : t;
+        k++;
+      }
+      if (this.context.childNodes.length > 0) this.context.append(" ");
+      const span = document.createElement("span");
+      span.textContent = text;
+      if (word === cur) span.className = "current";
+      this.context.append(span);
     }
   }
 

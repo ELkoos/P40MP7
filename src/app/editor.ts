@@ -1,4 +1,4 @@
-import { buildSchedule, remainingMs, tokenize, WPM_MAX, WPM_MIN } from "../core";
+import { buildSchedule, DEFAULT_RAMP, remainingMs, tokenize, wpmForDuration, WPM_MAX, WPM_MIN } from "../core";
 import { makeBackup, mergeScripts, parseBackup, safeFileName } from "./backup";
 import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey, type Command } from "./keys";
 import { Player } from "./player";
@@ -40,10 +40,24 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
   return e;
 }
 
+/** "3:30", "3.5" albo "3" (minuty) → ms; null, gdy nie da się odczytać. */
+export function parseDuration(text: string): number | null {
+  const t = text.trim().replace(",", ".");
+  const m = /^(\d+):([0-5]?\d)$/.exec(t);
+  if (m) return (Number(m[1]) * 60 + Number(m[2])) * 1000;
+  if (/^\d+(\.\d+)?$/.test(t)) return Number(t) * 60000;
+  return null;
+}
+
 function field(label: string, control: HTMLElement, hint?: string): HTMLLabelElement {
   const l = el("label", { className: "field" }, el("span", { className: "field-label" }, label), control);
   if (hint) l.append(el("span", { className: "field-hint" }, hint));
   return l;
+}
+
+function withNote(label: HTMLLabelElement, note: HTMLElement): HTMLLabelElement {
+  label.append(note);
+  return label;
 }
 
 /** Edytor, biblioteka i ustawienia (F-01–F-05, F-14, F-15). */
@@ -177,6 +191,37 @@ export class EditorView {
       save();
     });
 
+    // Dopasowanie prędkości do zadanego czasu (porównanie z rynkiem: Teleprompter.com, Teleprompter Pro, PrompterPal).
+    const target = el("input", { type: "text", placeholder: "np. 3:30", inputMode: "decimal", size: 6 });
+    const fitBtn = el("button", { type: "button", textContent: "Dopasuj prędkość" });
+    const fitNote = el("span", { className: "field-hint" });
+    const fit = () => {
+      const ms = parseDuration(target.value);
+      if (ms === null || ms <= 0) {
+        fitNote.textContent = "Podaj czas jako minuty:sekundy, np. 3:30, albo minuty, np. 2.5.";
+        return;
+      }
+      const tokens = tokenize(this.bodyInput.value, { splitLongWords: s.mode === "B" });
+      if (tokens.length === 0) {
+        fitNote.textContent = "Najpierw wpisz tekst.";
+        return;
+      }
+      const exact = wpmForDuration(buildSchedule(tokens), 0, ms, s.rampMs, DEFAULT_RAMP.from);
+      const v = Math.min(WPM_MAX, Math.max(WPM_MIN, Math.round(exact)));
+      if (s.mode === "A") s.wpmA = v;
+      else s.wpmB = v;
+      syncWpm();
+      save();
+      fitNote.textContent =
+        exact > WPM_MAX ? `Za krótko: potrzeba ${Math.round(Math.min(exact, 99999))} słów/min, ustawiono maksimum ${WPM_MAX}.`
+        : exact < WPM_MIN ? `Za długo: potrzeba ${Math.round(exact)} słów/min, ustawiono minimum ${WPM_MIN}.`
+        : `Ustawiono ${v} słów/min. Czas liczony od początku tekstu, z rozbiegiem, bez odliczania i pauz.`;
+    };
+    fitBtn.addEventListener("click", fit);
+    target.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") fit();
+    });
+
     const range = (value: number, min: number, max: number, step: number, set: (v: number) => void, unit: string) => {
       const input = el("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(value) });
       const out = el("output", { textContent: `${value}${unit}` });
@@ -243,6 +288,7 @@ export class EditorView {
         { className: "settings-grid" },
         field("Tryb", mode),
         field("Prędkość, słów/min", wpm, `Zakres ${WPM_MIN}–${WPM_MAX}; osobno dla każdego trybu`),
+        withNote(field("Czas docelowy, min:s", el("span", { className: "range" }, target, fitBtn)), fitNote),
         field("Punkt odczytu od góry", range(s.focusPct, 10, 90, 1, (v) => (s.focusPct = v), "%"), "Bliżej kamery = wyżej"),
         field("Rozmiar czcionki, px", fontSize, "Puste = auto (48 px, na wąskim ekranie 32 px)"),
         field("Interlinia", range(s.lineHeight, 1.1, 2, 0.1, (v) => (s.lineHeight = v), "")),
@@ -446,8 +492,9 @@ export class EditorView {
     const tokens = tokenize(this.bodyInput.value, { splitLongWords: this.settings.mode === "B" });
     const words = new Set(tokens.map((t) => t.sourceWord)).size;
     const ms = remainingMs(buildSchedule(tokens), 0, wpmFor(this.settings));
-    const min = Math.floor(ms / 60000);
-    const sec = Math.round((ms % 60000) / 1000);
+    const total = Math.round(ms / 1000);
+    const min = Math.floor(total / 60);
+    const sec = total % 60;
     this.estimate.textContent = `${words} słów · ok. ${min} min ${sec} s przy ${wpmFor(this.settings)} słów/min`;
   }
 
