@@ -1,3 +1,5 @@
+import type { KeyMap } from "./keys";
+
 export type Mode = "A" | "B";
 export type Theme = "dark" | "light";
 export type FontChoice = "sans" | "serif" | "mono";
@@ -20,6 +22,8 @@ export interface Settings {
   rampMs: number;
   /** Tryb B: podgląd następnego słowa. */
   showNext: boolean;
+  /** Własne przypisania klawiszy, np. z trybu uczenia pilota (E4). */
+  keyMap: KeyMap;
 }
 
 export const SETTINGS_KEY = "prompter.settings";
@@ -38,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   countdownS: 3,
   rampMs: 2000,
   showNext: false,
+  keyMap: {},
 };
 
 export const FONT_STACKS: Record<FontChoice, string> = {
@@ -52,7 +57,8 @@ export function loadSettings(): Settings {
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<Settings>;
     if (parsed.version !== 1) return { ...DEFAULT_SETTINGS };
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    const keyMap = typeof parsed.keyMap === "object" && parsed.keyMap !== null ? parsed.keyMap : {};
+    return { ...DEFAULT_SETTINGS, ...parsed, keyMap };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

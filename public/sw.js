@@ -1,8 +1,8 @@
 // Service Worker: praca offline po pierwszym załadowaniu (N-01).
 // Nawigacja: najpierw sieć (żeby dostać nową wersję), przy braku sieci kopia z cache.
 // Pozostałe pliki z tego samego źródła: najpierw cache, w tle zapis z sieci.
-const CACHE = "prompter-v1";
-const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
+const CACHE = "prompter-v2";
+const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 // Pliki zbudowane przez Vite mają w nazwie skrót treści, więc ich listę bierzemy z index.html.
 async function precache() {

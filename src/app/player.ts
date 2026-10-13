@@ -12,60 +12,20 @@ import {
   type Token,
 } from "../core";
 import { RsvpRenderer, ScrollRenderer, type Renderer } from "./renderers";
-import { saveSettings, wpmFor, type Settings } from "./settings";
+import { keyId, resolveCommand, type Command } from "./keys";
+import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
 
-export type Command =
-  | "toggle"
-  | "faster"
-  | "slower"
-  | "prevSentence"
-  | "nextSentence"
-  | "prevParagraph"
-  | "nextParagraph"
-  | "home"
-  | "fullscreen"
-  | "switchMode"
-  | "exit";
+export type { Command } from "./keys";
 
 const WPM_STEP = 10;
 const HUD_MS = 2000;
 const SWIPE_PX = 40;
+const FONT_STEP = 4;
+const FOCUS_STEP = 5;
+const COLUMN_STEP = 5;
 
-/** Mapowanie klawiszy (sekcja 2) plus klawisze typowych pilotów prezentacyjnych [Z]. */
-export function commandForKey(e: KeyboardEvent): Command | null {
-  switch (e.key) {
-    case " ":
-    case "Enter":
-    case "b":
-    case "B":
-    case ".":
-    case "F5":
-      return "toggle";
-    case "ArrowUp":
-      return "faster";
-    case "ArrowDown":
-      return "slower";
-    case "ArrowLeft":
-      return "prevSentence";
-    case "ArrowRight":
-      return "nextSentence";
-    case "PageUp":
-      return "prevParagraph";
-    case "PageDown":
-      return "nextParagraph";
-    case "Home":
-      return "home";
-    case "f":
-    case "F":
-      return "fullscreen";
-    case "t":
-    case "T":
-      return "switchMode";
-    case "Escape":
-      return "exit";
-    default:
-      return null;
-  }
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
 }
 
 function formatTime(ms: number): string {
@@ -138,31 +98,47 @@ export class Player {
   }
 
   private buildToolbar(): HTMLDivElement {
-    const bar = document.createElement("div");
-    bar.className = "toolbar";
-    const buttons: [string, string, Command][] = [
-      ["⏮", "Poprzednie zdanie", "prevSentence"],
-      ["−", "Wolniej", "slower"],
-      ["⏯", "Start / pauza", "toggle"],
-      ["+", "Szybciej", "faster"],
-      ["⏭", "Następne zdanie", "nextSentence"],
-      ["A/B", "Zmień tryb", "switchMode"],
-      ["⛶", "Pełny ekran", "fullscreen"],
-      ["✕", "Wyjdź do edytora", "exit"],
+    const wrap = document.createElement("div");
+    wrap.className = "toolbars";
+    const rows: [string, string, Command][][] = [
+      [
+        ["⏮", "Poprzednie zdanie", "prevSentence"],
+        ["−", "Wolniej", "slower"],
+        ["⏯", "Start / pauza", "toggle"],
+        ["+", "Szybciej", "faster"],
+        ["⏭", "Następne zdanie", "nextSentence"],
+        ["A/B", "Zmień tryb", "switchMode"],
+        ["⛶", "Pełny ekran", "fullscreen"],
+        ["✕", "Wyjdź do edytora", "exit"],
+      ],
+      // E3: strojenie wyglądu bez wychodzenia z odtwarzacza.
+      [
+        ["A−", "Mniejsza czcionka", "fontDown"],
+        ["A+", "Większa czcionka", "fontUp"],
+        ["▲", "Punkt odczytu wyżej", "focusUp"],
+        ["▼", "Punkt odczytu niżej", "focusDown"],
+        ["→←", "Węższa kolumna", "columnNarrower"],
+        ["←→", "Szersza kolumna", "columnWider"],
+      ],
     ];
-    for (const [label, title, cmd] of buttons) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      b.title = title;
-      b.setAttribute("aria-label", title);
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.command(cmd);
-      });
-      bar.appendChild(b);
+    for (const row of rows) {
+      const bar = document.createElement("div");
+      bar.className = "toolbar";
+      for (const [label, title, cmd] of row) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.command(cmd);
+        });
+        bar.appendChild(b);
+      }
+      wrap.appendChild(bar);
     }
-    return bar;
+    return wrap;
   }
 
   /** Tokenizacja, harmonogram i renderer dla bieżącego trybu; pozycja na początku słowa źródłowego. */
@@ -174,10 +150,22 @@ export class Player {
     this.clock = new PlaybackClock(end, { wpm: wpmFor(this.settings), rampMs: this.settings.rampMs });
     const i = Math.max(0, tokenIndexOfWord(this.tokens, startWord));
     if (this.tokens.length > 0) this.clock.seek(this.schedule[i]!);
+    this.createRenderer();
+  }
+
+  /** Nowy renderer z bieżącymi ustawieniami; zegar i pozycja zostają bez zmian (E3). */
+  private createRenderer(): void {
+    this.renderer?.destroy();
     this.renderer =
       this.settings.mode === "A"
         ? new ScrollRenderer(this.stage, this.tokens, this.schedule, this.settings)
         : new RsvpRenderer(this.stage, this.tokens, this.settings);
+  }
+
+  private adjustLook(change: (s: Settings) => void): void {
+    change(this.settings);
+    saveSettings(this.settings);
+    this.createRenderer();
   }
 
   private currentWord(): number {
@@ -201,9 +189,12 @@ export class Player {
       this.counting ? "odliczanie" : this.clock.state === "playing" ? "odtwarzanie" : this.clock.state === "finished" ? "koniec" : "pauza";
     const end = this.schedule[this.tokens.length]!;
     const pct = end > 0 ? Math.round((this.clock.p / end) * 100) : 0;
+    const look =
+      `${effectiveFontSize(this.settings)} px · punkt ${this.settings.focusPct}%` +
+      (this.settings.mode === "A" ? ` · kolumna ${this.settings.columnCh} zn.` : "");
     const info = `Tryb ${this.settings.mode} · ${this.clock.wpm} sł./min · ${pct}% · zostało ${formatTime(
       remainingMs(this.schedule, this.clock.p, this.clock.wpm),
-    )} · ${state}`;
+    )} · ${state} · ${look}`;
     if (info !== this.lastInfo) {
       this.hudInfo.textContent = info;
       this.lastInfo = info;
@@ -256,6 +247,25 @@ export class Player {
         this.settings.mode = this.settings.mode === "A" ? "B" : "A";
         saveSettings(this.settings);
         this.build(word);
+        break;
+      }
+      case "fontUp":
+      case "fontDown": {
+        const d = cmd === "fontUp" ? FONT_STEP : -FONT_STEP;
+        this.adjustLook((s) => (s.fontSizePx = clamp(effectiveFontSize(s) + d, 16, 160)));
+        break;
+      }
+      case "focusUp":
+      case "focusDown": {
+        const d = cmd === "focusUp" ? -FOCUS_STEP : FOCUS_STEP;
+        this.adjustLook((s) => (s.focusPct = clamp(s.focusPct + d, 10, 90)));
+        break;
+      }
+      case "columnNarrower":
+      case "columnWider": {
+        if (this.settings.mode !== "A") break;
+        const d = cmd === "columnWider" ? COLUMN_STEP : -COLUMN_STEP;
+        this.adjustLook((s) => (s.columnCh = clamp(s.columnCh + d, 20, 100)));
         break;
       }
       case "exit":
@@ -326,7 +336,7 @@ export class Player {
 
   private onKey(e: KeyboardEvent): void {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const cmd = commandForKey(e);
+    const cmd = resolveCommand(keyId(e), this.settings.keyMap);
     if (!cmd) return;
     e.preventDefault();
     this.command(cmd);

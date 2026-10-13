@@ -1,7 +1,21 @@
 import { buildSchedule, remainingMs, tokenize, WPM_MAX, WPM_MIN } from "../core";
+import { makeBackup, mergeScripts, parseBackup, safeFileName } from "./backup";
+import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey, type Command } from "./keys";
 import { Player } from "./player";
 import { saveSettings, wpmFor, type Settings } from "./settings";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
+
+/** Pobranie pliku wygenerowanego w przeglądarce, bez serwera (E1). */
+function downloadFile(name: string, text: string, mime: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 const SAMPLE = `Witaj w prompterze.
 
@@ -32,6 +46,10 @@ export class EditorView {
   private script: Script | null = null;
   private saveTimer = 0;
   private settingsEl: HTMLElement;
+  private keysEl: HTMLElement;
+  private libraryStatus = el("p", { className: "library-status", role: "status" });
+  /** Komenda czekająca na naciśnięcie klawisza w trybie uczenia (E4). */
+  private learning: Command | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -76,9 +94,22 @@ export class EditorView {
       this.updateEstimate();
     });
 
+    // E1: kopia całej biblioteki i pojedynczy tekst do pliku.
+    const exportBtn = el("button", { type: "button", textContent: "Eksportuj wszystkie (.json)" });
+    exportBtn.addEventListener("click", () => void this.exportLibrary());
+    const backupInput = el("input", { type: "file", accept: ".json,application/json", hidden: true });
+    backupInput.addEventListener("change", () => void this.importBackup(backupInput));
+    const restoreBtn = el("button", { type: "button", textContent: "Importuj kopię (.json)" });
+    restoreBtn.addEventListener("click", () => backupInput.click());
+    const txtBtn = el("button", { type: "button", textContent: "Pobierz .txt" });
+    txtBtn.addEventListener("click", () => this.downloadTxt());
+
     const persistNote = store.persistent
       ? []
       : [el("p", { className: "warning", textContent: "Ta przeglądarka nie udostępnia IndexedDB: teksty znikną po zamknięciu karty." })];
+
+    this.keysEl = this.buildKeys();
+    window.addEventListener("keydown", (e) => this.onLearnKey(e), true);
 
     this.root = el(
       "div",
@@ -89,6 +120,8 @@ export class EditorView {
         el("h2", { textContent: "Teksty" }),
         newBtn,
         this.libraryList,
+        el("div", { className: "library-backup" }, exportBtn, restoreBtn, backupInput),
+        this.libraryStatus,
         ...persistNote,
       ),
       el(
@@ -97,23 +130,9 @@ export class EditorView {
         el("h1", { textContent: "Prompter" }),
         this.titleInput,
         this.bodyInput,
-        el("div", { className: "actions" }, startBtn, importBtn, deleteBtn, fileInput, this.estimate),
+        el("div", { className: "actions" }, startBtn, importBtn, txtBtn, deleteBtn, fileInput, this.estimate),
         (this.settingsEl = this.buildSettings()),
-        el(
-          "details",
-          { className: "help" },
-          el("summary", { textContent: "Sterowanie" }),
-          el(
-            "ul",
-            {},
-            el("li", { textContent: "Spacja, Enter, B, kropka, F5: start i pauza (piloty prezentacyjne wysyłają zwykle PageUp, PageDown, B lub F5)" }),
-            el("li", { textContent: "Strzałka w górę i w dół: prędkość ±10 słów/min" }),
-            el("li", { textContent: "Strzałka w lewo i w prawo: poprzednie i następne zdanie" }),
-            el("li", { textContent: "PageUp i PageDown: poprzedni i następny akapit" }),
-            el("li", { textContent: "Home: początek; T: zmiana trybu; F: pełny ekran; Escape: edytor" }),
-            el("li", { textContent: "Dotyk: stuknięcie = start i pauza, przesunięcie w górę lub w dół = prędkość, w lewo lub w prawo = zdanie" }),
-          ),
-        ),
+        this.keysEl,
       ),
     );
     host.appendChild(this.root);
@@ -206,6 +225,96 @@ export class EditorView {
         field("Podgląd następnego słowa (tryb B)", showNext),
       ),
     );
+  }
+
+  /** Sekcja „Sterowanie”: klawisze domyślne, własne i tryb uczenia pilota (E4). */
+  private buildKeys(): HTMLElement {
+    const rows = (Object.keys(COMMAND_LABELS) as Command[]).map((cmd) => {
+      const custom = Object.entries(this.settings.keyMap)
+        .filter(([, c]) => c === cmd)
+        .map(([id]) => {
+          const chip = el("button", { type: "button", className: "key-chip custom", textContent: `${keyLabel(id)} ✕`, title: "Usuń przypisanie" });
+          chip.addEventListener("click", () => {
+            this.settings.keyMap = unassignKey(this.settings.keyMap, id);
+            saveSettings(this.settings);
+            this.refreshKeys();
+          });
+          return chip;
+        });
+      const defaults = defaultKeysFor(cmd).map((id) => el("span", { className: "key-chip", textContent: keyLabel(id) }));
+      const learn = el("button", {
+        type: "button",
+        className: "learn",
+        textContent: this.learning === cmd ? "Naciśnij klawisz… (anuluj)" : "Przypisz",
+        title: "Przypisz klawisz lub przycisk pilota",
+      });
+      learn.addEventListener("click", () => {
+        this.learning = this.learning === cmd ? null : cmd;
+        this.refreshKeys();
+      });
+      return el("tr", {}, el("th", { scope: "row", textContent: COMMAND_LABELS[cmd] }), el("td", { className: "keys" }, ...defaults, ...custom), el("td", {}, learn));
+    });
+    return el(
+      "details",
+      { className: "help", open: this.learning !== null },
+      el("summary", { textContent: "Sterowanie i pilot" }),
+      el(
+        "p",
+        { className: "field-hint" },
+        "Aby użyć pilota, kliknij „Przypisz” przy akcji i naciśnij przycisk na pilocie. Własne przypisania mają pierwszeństwo przed domyślnymi. Dotyk w odtwarzaczu: stuknięcie = start i pauza, przesunięcie w górę lub w dół = prędkość, w lewo lub w prawo = zdanie.",
+      ),
+      el("div", { className: "table-wrap" }, el("table", { className: "keys-table" }, el("tbody", {}, ...rows))),
+    );
+  }
+
+  private refreshKeys(): void {
+    const fresh = this.buildKeys();
+    if ((this.keysEl as HTMLDetailsElement).open) (fresh as HTMLDetailsElement).open = true;
+    this.keysEl.replaceWith(fresh);
+    this.keysEl = fresh;
+  }
+
+  private onLearnKey(e: KeyboardEvent): void {
+    if (this.learning === null || this.root.hidden) return;
+    // Same modyfikatory nie są przypisywane; czekamy na właściwy klawisz.
+    if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.settings.keyMap = assignKey(this.settings.keyMap, keyId(e), this.learning);
+    saveSettings(this.settings);
+    this.learning = null;
+    this.refreshKeys();
+  }
+
+  private async exportLibrary(): Promise<void> {
+    await this.saveNow();
+    const list = await this.store.list();
+    const date = new Date().toISOString().slice(0, 10);
+    downloadFile(`prompter-kopia-${date}.json`, JSON.stringify(makeBackup(list, Date.now()), null, 2), "application/json");
+    this.libraryStatus.textContent = `Wyeksportowano ${list.length} tekst(y/ów).`;
+  }
+
+  private async importBackup(input: HTMLInputElement): Promise<void> {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      const incoming = parseBackup(await file.text());
+      await this.saveNow();
+      const result = mergeScripts(await this.store.list(), incoming);
+      for (const s of result.toWrite) await this.store.put(s);
+      this.libraryStatus.textContent = `Import: dodano ${result.added}, zaktualizowano ${result.updated}, bez zmian ${result.unchanged}.`;
+      await this.renderLibrary();
+    } catch (err) {
+      this.libraryStatus.textContent = `Import nieudany: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  private downloadTxt(): void {
+    const body = this.bodyInput.value;
+    if (body.trim() === "") return;
+    const title = this.titleInput.value.trim() || titleFrom(body);
+    downloadFile(`${safeFileName(title)}.txt`, body, "text/plain;charset=utf-8");
   }
 
   private async init(): Promise<void> {
@@ -320,6 +429,7 @@ export class EditorView {
       const fresh = this.buildSettings();
       this.settingsEl.replaceWith(fresh);
       this.settingsEl = fresh;
+      this.refreshKeys();
       this.updateEstimate();
     });
   }
