@@ -1,4 +1,5 @@
 import type { KeyMap } from "./keys";
+import type { CameraEdge } from "../core/recording";
 
 export type Mode = "A" | "B";
 export type Theme = "dark" | "light";
@@ -24,6 +25,29 @@ export interface Settings {
   showNext: boolean;
   /** Własne przypisania klawiszy, np. z trybu uczenia pilota (E4). */
   keyMap: KeyMap;
+  /** Środek kolumny (A) lub punkt ORP (B), % szerokości ekranu. Bez nagrywania 50. */
+  anchorPct: number;
+
+  // Nagrywanie wideo (src/app/recorder.ts).
+  record: boolean;
+  /** Gdzie jest kamera względem ekranu; tekst ustawiany jak najbliżej niej. */
+  cameraEdge: CameraEdge;
+  /** Kamera u góry: punkt odczytu od góry, % wysokości. */
+  recFocusPct: number;
+  /** Kamera z boku: środek kolumny od tej krawędzi, % szerokości. */
+  recSideAnchorPct: number;
+  /** Węższa kolumna przy nagrywaniu: mniejszy ruch oczu na boki. */
+  recColumnCh: number;
+  recHeight: 720 | 1080;
+  /** "" = domyślne urządzenie. */
+  cameraId: string;
+  micId: string;
+  /** Nagrywanie startuje z odliczaniem i kończy się chwilę po końcu tekstu. */
+  recAutoStart: boolean;
+  /** Podgląd kamery także w trakcie czytania (domyślnie tylko w pauzie). */
+  recPreviewWhilePlaying: boolean;
+  /** Podgląd jak w lustrze; zapisany plik nigdy nie jest odbity. */
+  mirrorPreview: boolean;
 }
 
 export const SETTINGS_KEY = "prompter.settings";
@@ -43,6 +67,18 @@ export const DEFAULT_SETTINGS: Settings = {
   rampMs: 2000,
   showNext: false,
   keyMap: {},
+  anchorPct: 50,
+  record: false,
+  cameraEdge: "top",
+  recFocusPct: 10,
+  recSideAnchorPct: 25,
+  recColumnCh: 24,
+  recHeight: 1080,
+  cameraId: "",
+  micId: "",
+  recAutoStart: true,
+  recPreviewWhilePlaying: false,
+  mirrorPreview: true,
 };
 
 export const FONT_STACKS: Record<FontChoice, string> = {

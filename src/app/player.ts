@@ -11,6 +11,7 @@ import {
   tokenize,
   type Token,
 } from "../core";
+import { RecordingController } from "./recorder";
 import { RsvpRenderer, ScrollRenderer, type Renderer } from "./renderers";
 import { keyId, resolveCommand, type Command } from "./keys";
 import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
@@ -58,6 +59,8 @@ export class Player {
   private resizeObserver: ResizeObserver;
   private lastInfo = "";
   private pointerStart: { x: number; y: number; t: number } | null = null;
+  private rec: RecordingController | null = null;
+  private finishedSeen = false;
 
   constructor(
     private host: HTMLElement,
@@ -65,6 +68,7 @@ export class Player {
     startWord: number,
     private settings: Settings,
     private onExit: (lastWord: number) => void,
+    title = "",
   ) {
     this.el = document.createElement("div");
     this.el.className = `player theme-${settings.theme}`;
@@ -80,6 +84,7 @@ export class Player {
     this.hud.append(this.hudInfo, this.buildToolbar());
     this.el.append(this.stage, this.overlay, this.hud);
     host.appendChild(this.el);
+    if (settings.record) this.rec = new RecordingController(this.el, settings, title);
 
     this.build(startWord);
 
@@ -108,6 +113,7 @@ export class Player {
         ["+", "Szybciej", "faster"],
         ["⏭", "Następne zdanie", "nextSentence"],
         ["A/B", "Zmień tryb", "switchMode"],
+        ...(this.settings.record ? ([["●", "Nagrywanie start / stop (R)", "record"]] as [string, string, Command][]) : []),
         ["⛶", "Pełny ekran", "fullscreen"],
         ["✕", "Wyjdź do edytora", "exit"],
       ],
@@ -156,10 +162,11 @@ export class Player {
   /** Nowy renderer z bieżącymi ustawieniami; zegar i pozycja zostają bez zmian (E3). */
   private createRenderer(): void {
     this.renderer?.destroy();
+    const view = RecordingController.viewSettings(this.settings);
     this.renderer =
       this.settings.mode === "A"
-        ? new ScrollRenderer(this.stage, this.tokens, this.schedule, this.settings)
-        : new RsvpRenderer(this.stage, this.tokens, this.settings);
+        ? new ScrollRenderer(this.stage, this.tokens, this.schedule, view)
+        : new RsvpRenderer(this.stage, this.tokens, view);
   }
 
   private adjustLook(change: (s: Settings) => void): void {
@@ -178,6 +185,12 @@ export class Player {
     const i = tokenIndexAt(this.schedule, p);
     if (i >= 0) this.renderer?.draw(i, p);
     if (this.clock.state === "finished" && this.wakeLock) this.releaseWakeLock();
+    if (this.rec) {
+      const finished = this.clock.state === "finished";
+      if (finished && !this.finishedSeen) this.rec.finished();
+      this.finishedSeen = finished;
+      this.rec.setPlaying(this.clock.state === "playing" || this.counting);
+    }
     this.updateHud(now);
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
@@ -189,9 +202,10 @@ export class Player {
       this.counting ? "odliczanie" : this.clock.state === "playing" ? "odtwarzanie" : this.clock.state === "finished" ? "koniec" : "pauza";
     const end = this.schedule[this.tokens.length]!;
     const pct = end > 0 ? Math.round((this.clock.p / end) * 100) : 0;
+    const view = RecordingController.viewSettings(this.settings);
     const look =
-      `${effectiveFontSize(this.settings)} px · punkt ${this.settings.focusPct}%` +
-      (this.settings.mode === "A" ? ` · kolumna ${this.settings.columnCh} zn.` : "");
+      `${effectiveFontSize(view)} px · punkt ${view.focusPct}%` +
+      (view.mode === "A" ? ` · kolumna ${view.columnCh} zn.` : "");
     const info = `Tryb ${this.settings.mode} · ${this.clock.wpm} sł./min · ${pct}% · zostało ${formatTime(
       remainingMs(this.schedule, this.clock.p, this.clock.wpm),
     )} · ${state} · ${look}`;
@@ -258,16 +272,30 @@ export class Player {
       case "focusUp":
       case "focusDown": {
         const d = cmd === "focusUp" ? -FOCUS_STEP : FOCUS_STEP;
-        this.adjustLook((s) => (s.focusPct = clamp(s.focusPct + d, 10, 90)));
+        // Przy nagrywaniu z kamerą z boku punkt odczytu jest stały (środek wysokości).
+        if (this.settings.record && this.settings.cameraEdge !== "top") break;
+        this.adjustLook((s) => {
+          if (s.record) s.recFocusPct = clamp(s.recFocusPct + d, 3, 40);
+          else s.focusPct = clamp(s.focusPct + d, 10, 90);
+        });
         break;
       }
       case "columnNarrower":
       case "columnWider": {
         if (this.settings.mode !== "A") break;
         const d = cmd === "columnWider" ? COLUMN_STEP : -COLUMN_STEP;
-        this.adjustLook((s) => (s.columnCh = clamp(s.columnCh + d, 20, 100)));
+        this.adjustLook((s) => {
+          if (s.record) s.recColumnCh = clamp(s.recColumnCh + d, 12, 60);
+          else s.columnCh = clamp(s.columnCh + d, 20, 100);
+        });
         break;
       }
+      case "record":
+        this.rec?.toggle();
+        break;
+      case "preview":
+        this.rec?.togglePreview();
+        break;
       case "exit":
         this.exit();
         break;
@@ -276,6 +304,7 @@ export class Player {
 
   private startWithCountdown(): void {
     if (this.tokens.length === 0) return;
+    this.rec?.countdownStarted();
     let left = this.settings.countdownS;
     if (left <= 0) {
       this.play();
@@ -385,6 +414,8 @@ export class Player {
     this.releaseWakeLock();
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => undefined);
     this.renderer?.destroy();
+    // Trwające nagranie zostaje zapisane do pliku także po wyjściu z odtwarzacza.
+    void this.rec?.destroy();
     this.el.remove();
   }
 }

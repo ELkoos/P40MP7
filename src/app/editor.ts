@@ -2,6 +2,7 @@ import { buildSchedule, remainingMs, tokenize, WPM_MAX, WPM_MIN } from "../core"
 import { makeBackup, mergeScripts, parseBackup, safeFileName } from "./backup";
 import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey, type Command } from "./keys";
 import { Player } from "./player";
+import { RecordingSettingsPanel } from "./recorder";
 import { saveSettings, wpmFor, type Settings } from "./settings";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
 
@@ -50,6 +51,7 @@ export class EditorView {
   private libraryStatus = el("p", { className: "library-status", role: "status" });
   /** Komenda czekająca na naciśnięcie klawisza w trybie uczenia (E4). */
   private learning: Command | null = null;
+  private recordingPanel: RecordingSettingsPanel;
 
   constructor(
     private host: HTMLElement,
@@ -132,6 +134,7 @@ export class EditorView {
         this.bodyInput,
         el("div", { className: "actions" }, startBtn, importBtn, txtBtn, deleteBtn, fileInput, this.estimate),
         (this.settingsEl = this.buildSettings()),
+        (this.recordingPanel = new RecordingSettingsPanel(this.settings)).el,
         this.keysEl,
       ),
     );
@@ -418,6 +421,7 @@ export class EditorView {
     if (this.bodyInput.value.trim() === "") return;
     // Pełny ekran musi być wywołany synchronicznie w obsłudze gestu użytkownika (F-17).
     this.host.requestFullscreen?.().catch(() => undefined);
+    this.recordingPanel.stopPreview();
     await this.saveNow();
     const s = this.script!;
     this.root.hidden = true;
@@ -429,8 +433,13 @@ export class EditorView {
       const fresh = this.buildSettings();
       this.settingsEl.replaceWith(fresh);
       this.settingsEl = fresh;
+      // Punkt odczytu i kolumna przy nagrywaniu mogły zmienić się w odtwarzaczu (E3).
+      const panel = new RecordingSettingsPanel(this.settings);
+      panel.el.open = this.recordingPanel.el.open;
+      this.recordingPanel.el.replaceWith(panel.el);
+      this.recordingPanel = panel;
       this.refreshKeys();
       this.updateEstimate();
-    });
+    }, s.title);
   }
 }

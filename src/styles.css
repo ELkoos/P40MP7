@@ -494,3 +494,94 @@ button.key-chip.custom {
   border-color: rgba(255, 255, 255, 0.25);
   color: #fff;
 }
+
+/* ---------- Nagrywanie wideo ---------- */
+
+.cam-test {
+  display: block;
+  width: min(100%, 480px);
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+.cam-test[hidden],
+.cam-preview[hidden],
+.rec-toast[hidden] {
+  display: none;
+}
+
+/* Tylko podgląd; plik z MediaRecorder nie jest odbijany. */
+.mirrored {
+  transform: scaleX(-1);
+}
+
+.cam-preview {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  width: min(28vw, 320px);
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.rec-badge {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 12px;
+  max-width: calc(100% - 24px - min(28vw, 320px) - 12px);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.rec-badge[data-kind="rec"] {
+  background: #c4161c;
+  font-weight: 600;
+}
+
+.rec-badge[data-kind="error"] {
+  background: #8a5a00;
+}
+
+.rec-toast {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 32px));
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(20, 22, 26, 0.95);
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  overflow-wrap: anywhere;
+  z-index: 3;
+}
+
+.rec-toast span {
+  flex: 1 1 100%;
+}
+
+.rec-toast button {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}

@@ -16,6 +16,8 @@ export type Command =
   | "focusDown"
   | "columnNarrower"
   | "columnWider"
+  | "record"
+  | "preview"
   | "exit";
 
 /** Własne przypisania: identyfikator klawisza → komenda. Mają pierwszeństwo przed domyślnymi. */
@@ -38,6 +40,8 @@ export const COMMAND_LABELS: Record<Command, string> = {
   focusDown: "Punkt odczytu niżej",
   columnNarrower: "Węższa kolumna (tryb A)",
   columnWider: "Szersza kolumna (tryb A)",
+  record: "Nagrywanie start / stop",
+  preview: "Podgląd kamery",
   exit: "Powrót do edytora",
 };
 
@@ -71,6 +75,10 @@ export const DEFAULT_KEYS: Readonly<KeyMap> = {
   "]": "focusDown",
   ";": "columnNarrower",
   "'": "columnWider",
+  r: "record",
+  R: "record",
+  p: "preview",
+  P: "preview",
   Escape: "exit",
 };
 
