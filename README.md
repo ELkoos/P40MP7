@@ -22,7 +22,7 @@ Autonomiczny prompter tekstu (PWA, offline, bez backendu). Projekt: [dokument pr
 Włączane w edytorze, sekcja „Nagrywanie wideo”. Kamera i mikrofon przez `getUserMedia`, zapis przez `MediaRecorder`, bez serwera i bez sieci.
 
 - Tekst przesuwa się jak najbliżej obiektywu: przy kamerze nad ekranem punkt odczytu domyślnie 10% od góry, przy kamerze z boku (telefon poziomo) kolumna przy tej krawędzi. Kolumna węższa (24 znaki), żeby wzrok mniej uciekał na boki. Bez trybu lustrzanego tekstu.
-- Nagrywanie startuje razem z odliczaniem i kończy się 2 s po ostatnim słowie; R włącza i wyłącza je ręcznie. Pauza tekstu nie przerywa nagrania.
+- Nagrywanie startuje razem z odliczaniem i kończy się 2 s po ostatnim słowie; R włącza i wyłącza je ręcznie. W trakcie nagrywania w lewym dolnym rogu jest zawsze widoczny przycisk „■ STOP” (mysz i dotyk), także gdy pasek narzędzi jest schowany; zatrzymuje nagranie i zapisuje plik, tekst czyta się dalej. Pauza tekstu nie przerywa nagrania.
 - Plik zapisuje się od razu po zatrzymaniu (pobieranie), także przy wyjściu z odtwarzacza w trakcie nagrania. Na telefonie dodatkowo przycisk „Udostępnij / zapisz w galerii”.
 - Podgląd kamery (P) widoczny w pauzie, w trakcie czytania ukryty (do zmiany w ustawieniach). Podgląd może być lustrzany, plik nigdy nie jest odbijany.
 - Przycisk „Sprawdź kamerę” pokazuje podgląd, faktyczną rozdzielczość i format, który zostanie użyty w tej przeglądarce.
