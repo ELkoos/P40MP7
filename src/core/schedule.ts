@@ -45,6 +45,19 @@ export function remainingMs(schedule: Float64Array, p: number, wpm: number): num
   return (Math.max(0, end - p) * 60000) / wpm;
 }
 
+/**
+ * Prędkość (WPM), przy której tekst od pozycji p do końca zajmie targetMs (F-22 odwrócone).
+ * Uwzględnia stratę czasu na jeden rozbieg: (1 − rampFrom) × rampMs / 2, przy założeniu, że rozbieg kończy się przed końcem tekstu.
+ * Wynik nie jest przycinany do WPM_MIN–WPM_MAX; Infinity, gdy targetMs nie starcza nawet na rozbieg.
+ */
+export function wpmForDuration(schedule: Float64Array, p: number, targetMs: number, rampMs = 0, rampFrom = 1): number {
+  const end = schedule[schedule.length - 1]!;
+  const slots = Math.max(0, end - p);
+  const fullSpeedMs = targetMs - ((1 - rampFrom) * rampMs) / 2;
+  if (fullSpeedMs <= 0) return Number.POSITIVE_INFINITY;
+  return (slots * 60000) / fullSpeedMs;
+}
+
 /** Indeks pierwszego tokenu należącego do danego słowa źródłowego (zmiana trybu, 4). */
 export function tokenIndexOfWord(tokens: readonly { sourceWord: number }[], word: number): number {
   let lo = 0;

@@ -367,6 +367,22 @@ summary {
   white-space: pre;
 }
 
+.mode-b .context {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  font-size: 0.5em;
+  line-height: 1.4;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.mode-b .context .current {
+  color: var(--p-orp);
+  opacity: 1;
+}
+
 /* Odliczanie i HUD */
 .overlay {
   position: absolute;

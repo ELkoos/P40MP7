@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PlaybackClock } from "../src/core/clock";
-import { nextParagraph, nextSentence, previousSentence } from "../src/core/navigation";
-import { buildSchedule, remainingMs, tokenFraction, tokenIndexAt } from "../src/core/schedule";
+import { nextParagraph, nextSentence, previousSentence, sentenceRange } from "../src/core/navigation";
+import { buildSchedule, remainingMs, tokenFraction, tokenIndexAt, wpmForDuration } from "../src/core/schedule";
 import { columnOffset, scrollY } from "../src/core/scroll";
 import { tokenize } from "../src/core/tokenizer";
 
@@ -146,5 +146,38 @@ describe("tokenIndexOfWord", () => {
     expect(tokenIndexOfWord(t, 0)).toBe(0);
     expect(tokenIndexOfWord(t, 1)).toBe(1);
     expect(tokenIndexOfWord(t, 2)).toBe(5);
+  });
+});
+
+describe("wpmForDuration", () => {
+  it("bez rozbiegu odwraca remainingMs", () => {
+    const s = buildSchedule(tokenize("jeden dwa trzy cztery pięć sześć siedem osiem dziewięć dziesięć"));
+    expect(wpmForDuration(s, 0, remainingMs(s, 0, 150))).toBeCloseTo(150, 6);
+    expect(wpmForDuration(s, 5, remainingMs(s, 5, 200))).toBeCloseTo(200, 6);
+  });
+
+  it("z rozbiegiem zegar kończy tekst dokładnie w zadanym czasie", () => {
+    const s = buildSchedule(tokenize(Array.from({ length: 300 }, (_, k) => `słowo${k}`).join(" ")));
+    const target = 120_000;
+    const wpm = wpmForDuration(s, 0, target, 2000, 0.5);
+    const clock = new PlaybackClock(s[s.length - 1]!, { wpm, rampMs: 2000, rampFrom: 0.5 });
+    clock.play(0);
+    let t = 0;
+    while (clock.state === "playing" && t < 10 * target) clock.tick((t += 10));
+    expect(Math.abs(t - target)).toBeLessThanOrEqual(10);
+  });
+
+  it("Infinity, gdy czas nie starcza na rozbieg", () => {
+    const s = buildSchedule(tokenize("a b c"));
+    expect(wpmForDuration(s, 0, 400, 2000, 0.5)).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe("sentenceRange", () => {
+  it("zwraca pierwszy i ostatni token zdania", () => {
+    const t = tokenize("Ala ma kota. Kot ma Alę, a pies nie.\n\nNowy akapit");
+    expect(sentenceRange(t, 0)).toEqual([0, 2]);
+    expect(sentenceRange(t, 5)).toEqual([3, 8]);
+    expect(sentenceRange(t, 9)).toEqual([9, 10]);
   });
 });

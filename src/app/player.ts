@@ -189,6 +189,7 @@ export class Player {
     const p = this.clock.tick(now);
     const i = tokenIndexAt(this.schedule, p);
     if (i >= 0) this.renderer?.draw(i, p);
+    this.renderer?.setPaused(this.clock.state !== "playing" && !this.counting);
     if (this.clock.state === "finished" && this.wakeLock) this.releaseWakeLock();
     this.updateHud(now);
     this.raf = requestAnimationFrame((t) => this.frame(t));
