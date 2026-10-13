@@ -100,7 +100,7 @@ export class Player {
       const words = tokenize(body, { splitLongWords: false }).map((t) => t.text);
       this.voice = {
         matcher: new VoiceMatcher(words),
-        follower: new VoiceFollower(),
+        follower: new VoiceFollower({ latencyMs: settings.voiceLatencyMs }),
         listener: new SpeechListener(
           settings.voiceLang,
           (heard) => this.onHeard(heard),
@@ -365,7 +365,8 @@ export class Player {
   private resyncVoice(now: number): void {
     if (!this.voice) return;
     this.voice.matcher.reset(this.currentWord());
-    this.voice.follower.reset(this.clock.p, now);
+    // Tempo startowe z ustawionej prędkości (słowo ≈ slot), zanim zmierzymy tempo lektora.
+    this.voice.follower.reset(this.clock.p, now, wpmFor(this.settings) / 60000);
   }
 
   /** Nowa hipoteza rozpoznawania: dopasowanie i cel = początek słowa po wypowiedzianym. */
