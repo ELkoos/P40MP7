@@ -48,6 +48,10 @@ export interface Settings {
   recPreviewWhilePlaying: boolean;
   /** Podgląd jak w lustrze; zapisany plik nigdy nie jest odbity. */
   mirrorPreview: boolean;
+  /** Podążanie za głosem (Q4): pozycję wyznacza rozpoznawanie mowy zamiast prędkości. Wymaga sieci. */
+  followVoice: boolean;
+  /** Język rozpoznawania, znacznik BCP 47. */
+  voiceLang: string;
 }
 
 export const SETTINGS_KEY = "prompter.settings";
@@ -79,6 +83,8 @@ export const DEFAULT_SETTINGS: Settings = {
   recAutoStart: true,
   recPreviewWhilePlaying: false,
   mirrorPreview: true,
+  followVoice: false,
+  voiceLang: "pl-PL",
 };
 
 export const FONT_STACKS: Record<FontChoice, string> = {

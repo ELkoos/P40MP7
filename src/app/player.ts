@@ -9,15 +9,19 @@ import {
   tokenIndexAt,
   tokenIndexOfWord,
   tokenize,
+  VoiceFollower,
+  VoiceMatcher,
   type Token,
 } from "../core";
 import { RecordingController } from "./recorder";
 import { RsvpRenderer, ScrollRenderer, type Renderer } from "./renderers";
 import { keyId, resolveCommand, type Command } from "./keys";
 import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
+import { SpeechListener, speechSupport, type ListenerStatus } from "./speech";
 
 export type { Command } from "./keys";
 
+const NAVIGATION: ReadonlySet<Command> = new Set(["prevSentence", "nextSentence", "prevParagraph", "nextParagraph", "home"]);
 const WPM_STEP = 10;
 const HUD_MS = 2000;
 const SWIPE_PX = 40;
@@ -61,6 +65,10 @@ export class Player {
   private pointerStart: { x: number; y: number; t: number } | null = null;
   private rec: RecordingController | null = null;
   private finishedSeen = false;
+  /** Podążanie za głosem; null, gdy wyłączone w ustawieniach lub niedostępne. */
+  private voice: { listener: SpeechListener; matcher: VoiceMatcher; follower: VoiceFollower } | null = null;
+  private voiceStatus: ListenerStatus = "off";
+  private voiceMessage = "";
 
   constructor(
     private host: HTMLElement,
@@ -87,6 +95,23 @@ export class Player {
     if (settings.record) this.rec = new RecordingController(this.el, settings, title);
 
     this.build(startWord);
+    if (settings.followVoice && speechSupport().ok) {
+      // Dopasowanie po słowach źródłowych: tokeny bez dzielenia długich słów, indeks tokenu = sourceWord.
+      const words = tokenize(body, { splitLongWords: false }).map((t) => t.text);
+      this.voice = {
+        matcher: new VoiceMatcher(words),
+        follower: new VoiceFollower(),
+        listener: new SpeechListener(
+          settings.voiceLang,
+          (heard) => this.onHeard(heard),
+          (status, message) => {
+            this.voiceStatus = status;
+            this.voiceMessage = message ?? (status === "error" ? this.voiceMessage : "");
+            if (status === "error") this.showHud();
+          },
+        ),
+      };
+    }
 
     this.onKey = this.onKey.bind(this);
     this.onVisibility = this.onVisibility.bind(this);
@@ -181,32 +206,51 @@ export class Player {
   }
 
   private frame(now: number): void {
+    // Przy podążaniu za głosem zegar stoi, a p ustawia VoiceFollower.
+    if (this.voice?.listener.listening) this.clock.seek(this.voice.follower.tick(now, this.clock.p));
     const p = this.clock.tick(now);
     const i = tokenIndexAt(this.schedule, p);
     if (i >= 0) this.renderer?.draw(i, p);
     if (this.clock.state === "finished" && this.wakeLock) this.releaseWakeLock();
     if (this.rec) {
-      const finished = this.clock.state === "finished";
+      // Przy podążaniu za głosem zegar stoi, więc koniec tekstu i „odtwarzanie” wynikają z pozycji i mikrofonu.
+      const listening = this.voice?.listener.listening ?? false;
+      const finished = this.clock.state === "finished" || (listening && p >= this.schedule[this.tokens.length]!);
       if (finished && !this.finishedSeen) this.rec.finished();
       this.finishedSeen = finished;
-      this.rec.setPlaying(this.clock.state === "playing" || this.counting);
+      this.rec.setPlaying(this.clock.state === "playing" || this.counting || listening);
     }
     this.updateHud(now);
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
 
   private updateHud(now: number): void {
-    const playing = this.clock.state === "playing" || this.counting;
-    this.hud.classList.toggle("visible", !playing || now < this.hudUntil);
-    const state =
-      this.counting ? "odliczanie" : this.clock.state === "playing" ? "odtwarzanie" : this.clock.state === "finished" ? "koniec" : "pauza";
+    const listening = this.voice?.listener.listening ?? false;
+    const playing = this.clock.state === "playing" || this.counting || listening;
+    this.hud.classList.toggle("visible", !playing || now < this.hudUntil || this.voiceStatus === "error");
+    const state = listening
+      ? this.voiceStatus === "error"
+        ? `mikrofon: ${this.voiceMessage}`
+        : this.voiceStatus === "listening"
+          ? "słucham"
+          : "włączanie mikrofonu"
+      : this.voiceStatus === "error"
+        ? `mikrofon: ${this.voiceMessage}`
+        : this.counting
+          ? "odliczanie"
+          : this.clock.state === "playing"
+            ? "odtwarzanie"
+            : this.clock.state === "finished"
+              ? "koniec"
+              : "pauza";
     const end = this.schedule[this.tokens.length]!;
     const pct = end > 0 ? Math.round((this.clock.p / end) * 100) : 0;
     const view = RecordingController.viewSettings(this.settings);
     const look =
       `${effectiveFontSize(view)} px · punkt ${view.focusPct}%` +
       (view.mode === "A" ? ` · kolumna ${view.columnCh} zn.` : "");
-    const info = `Tryb ${this.settings.mode} · ${this.clock.wpm} sł./min · ${pct}% · zostało ${formatTime(
+    const speed = this.voice ? "za głosem" : `${this.clock.wpm} sł./min`;
+    const info = `Tryb ${this.settings.mode} · ${speed} · ${pct}% · zostało ${formatTime(
       remainingMs(this.schedule, this.clock.p, this.clock.wpm),
     )} · ${state} · ${look}`;
     if (info !== this.lastInfo) {
@@ -224,7 +268,10 @@ export class Player {
     this.showHud();
     switch (cmd) {
       case "toggle":
-        if (this.counting) this.cancelCountdown();
+        if (this.voice) {
+          if (this.voice.listener.listening) this.pause();
+          else this.startVoice();
+        } else if (this.counting) this.cancelCountdown();
         else if (this.clock.state === "playing") this.pause();
         else this.startWithCountdown();
         break;
@@ -300,6 +347,35 @@ export class Player {
         this.exit();
         break;
     }
+    // Po nawigacji ręcznej dopasowanie zaczyna od nowej pozycji.
+    if (this.voice && NAVIGATION.has(cmd)) this.resyncVoice(now);
+  }
+
+  private startVoice(): void {
+    if (!this.voice || this.tokens.length === 0) return;
+    if (this.clock.p >= this.schedule[this.tokens.length]!) this.clock.seek(0);
+    this.voiceMessage = "";
+    this.rec?.countdownStarted();
+    this.resyncVoice(performance.now());
+    this.voice.listener.start();
+    this.requestWakeLock();
+  }
+
+  private resyncVoice(now: number): void {
+    if (!this.voice) return;
+    this.voice.matcher.reset(this.currentWord());
+    this.voice.follower.reset(this.clock.p, now);
+  }
+
+  /** Nowa hipoteza rozpoznawania: dopasowanie i cel = początek słowa po wypowiedzianym. */
+  private onHeard(heard: string[]): void {
+    const v = this.voice;
+    if (!v) return;
+    const match = v.matcher.update(heard);
+    if (!match) return;
+    const next = tokenIndexOfWord(this.tokens, match.word + 1);
+    const slot = match.word + 1 > this.tokens[this.tokens.length - 1]!.sourceWord ? this.schedule[this.tokens.length]! : this.schedule[next]!;
+    v.follower.setTarget(slot, performance.now());
   }
 
   private startWithCountdown(): void {
@@ -337,6 +413,7 @@ export class Player {
   }
 
   private pause(): void {
+    if (this.voice?.listener.listening) this.voice.listener.stop();
     if (this.counting) this.cancelCountdown();
     this.clock.pause();
     this.releaseWakeLock();
@@ -397,7 +474,8 @@ export class Player {
   }
 
   private exit(): void {
-    const finished = this.clock.state === "finished";
+    // Przy podążaniu za głosem zegar nie przechodzi w stan "finished", więc sprawdzamy też pozycję.
+    const finished = this.clock.state === "finished" || (this.tokens.length > 0 && this.clock.p >= this.schedule[this.tokens.length]!);
     this.pause();
     // Po przeczytaniu całości następne otwarcie zaczyna od początku.
     const word = finished ? 0 : this.currentWord();
@@ -407,6 +485,7 @@ export class Player {
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
+    if (this.voice?.listener.listening) this.voice.listener.stop();
     window.clearInterval(this.countdownTimer);
     window.removeEventListener("keydown", this.onKey);
     document.removeEventListener("visibilitychange", this.onVisibility);

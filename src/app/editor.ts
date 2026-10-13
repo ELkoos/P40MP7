@@ -4,6 +4,7 @@ import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey
 import { Player } from "./player";
 import { RecordingSettingsPanel } from "./recorder";
 import { saveSettings, wpmFor, type Settings } from "./settings";
+import { speechSupport } from "./speech";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
 
 /** Pobranie pliku wygenerowanego w przeglądarce, bez serwera (E1). */
@@ -23,6 +24,14 @@ const SAMPLE = `Witaj w prompterze.
 Wpisz lub wklej tutaj swój tekst. Pusta linia rozpoczyna nowy akapit.
 
 Naciśnij Start albo spację. Strzałki w górę i w dół zmieniają prędkość, strzałki w lewo i w prawo przeskakują o zdanie. Escape wraca do edytora.`;
+
+const VOICE_LANGS: [string, string][] = [
+  ["pl-PL", "polski"],
+  ["en-US", "angielski (USA)"],
+  ["en-GB", "angielski (Wielka Brytania)"],
+  ["de-DE", "niemiecki"],
+  ["uk-UA", "ukraiński"],
+];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -208,6 +217,23 @@ export class EditorView {
       save();
     });
 
+    const support = speechSupport();
+    const followVoice = el("input", { type: "checkbox", checked: s.followVoice && support.ok, disabled: !support.ok });
+    followVoice.addEventListener("change", () => {
+      s.followVoice = followVoice.checked;
+      save();
+    });
+    const voiceLang = el(
+      "select",
+      { disabled: !support.ok },
+      ...VOICE_LANGS.map(([value, label]) => el("option", { value, textContent: label })),
+    );
+    voiceLang.value = s.voiceLang;
+    voiceLang.addEventListener("change", () => {
+      s.voiceLang = voiceLang.value;
+      save();
+    });
+
     return el(
       "details",
       { className: "settings", open: true },
@@ -226,6 +252,14 @@ export class EditorView {
         field("Odliczanie przed startem", range(s.countdownS, 0, 10, 1, (v) => (s.countdownS = v), " s")),
         field("Rozbieg prędkości", range(s.rampMs, 0, 5000, 250, (v) => (s.rampMs = v), " ms"), "Od 50% do pełnej prędkości"),
         field("Podgląd następnego słowa (tryb B)", showNext),
+        field(
+          "Podążanie za głosem",
+          followVoice,
+          support.ok
+            ? "Tekst przesuwa się za czytającym, przy ciszy stoi. Wymaga internetu: dźwięk z mikrofonu trafia do usługi rozpoznawania mowy przeglądarki (w Chrome do serwerów Google). Bez tej opcji prompter działa offline."
+            : support.reason,
+        ),
+        field("Język mowy", voiceLang),
       ),
     );
   }
@@ -264,7 +298,7 @@ export class EditorView {
       el(
         "p",
         { className: "field-hint" },
-        "Aby użyć pilota, kliknij „Przypisz” przy akcji i naciśnij przycisk na pilocie. Własne przypisania mają pierwszeństwo przed domyślnymi. Dotyk w odtwarzaczu: stuknięcie = start i pauza, przesunięcie w górę lub w dół = prędkość, w lewo lub w prawo = zdanie.",
+        "Aby użyć pilota, kliknij „Przypisz” przy akcji i naciśnij przycisk na pilocie. Własne przypisania mają pierwszeństwo przed domyślnymi. Dotyk w odtwarzaczu: stuknięcie = start i pauza, przesunięcie w górę lub w dół = prędkość, w lewo lub w prawo = zdanie. Z podążaniem za głosem start i pauza włączają i wyłączają mikrofon; nawigacja działa jak zwykle, a dopasowanie zaczyna od nowej pozycji.",
       ),
       el("div", { className: "table-wrap" }, el("table", { className: "keys-table" }, el("tbody", {}, ...rows))),
     );

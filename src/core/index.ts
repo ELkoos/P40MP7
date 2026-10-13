@@ -6,3 +6,4 @@ export * from "./schedule";
 export * from "./clock";
 export * from "./navigation";
 export * from "./scroll";
+export * from "./voice";
