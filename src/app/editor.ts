@@ -51,8 +51,24 @@ export class EditorView {
     fileInput.addEventListener("change", () => this.importFile(fileInput));
     const importBtn = el("button", { type: "button", textContent: "Importuj .txt" });
     importBtn.addEventListener("click", () => fileInput.click());
+    // Potwierdzenie w samym przycisku zamiast window.confirm (nie działa w osadzonych widokach).
     const deleteBtn = el("button", { type: "button", textContent: "Usuń" });
-    deleteBtn.addEventListener("click", () => this.deleteCurrent());
+    let confirmTimer = 0;
+    deleteBtn.addEventListener("click", () => {
+      if (deleteBtn.dataset.confirm === "1") {
+        window.clearTimeout(confirmTimer);
+        delete deleteBtn.dataset.confirm;
+        deleteBtn.textContent = "Usuń";
+        void this.deleteCurrent();
+        return;
+      }
+      deleteBtn.dataset.confirm = "1";
+      deleteBtn.textContent = "Kliknij ponownie, aby usunąć";
+      confirmTimer = window.setTimeout(() => {
+        delete deleteBtn.dataset.confirm;
+        deleteBtn.textContent = "Usuń";
+      }, 4000);
+    });
 
     this.titleInput.addEventListener("input", () => this.scheduleSave());
     this.bodyInput.addEventListener("input", () => {
@@ -272,7 +288,6 @@ export class EditorView {
   private async deleteCurrent(): Promise<void> {
     const s = this.script;
     if (!s) return;
-    if (!window.confirm(`Usunąć tekst „${s.title || "bez tytułu"}”?`)) return;
     await this.store.remove(s.id);
     this.script = null;
     const list = await this.store.list();

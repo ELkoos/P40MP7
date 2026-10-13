@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #ffffff;
   --fg: #16181d;
   --muted: #5b6270;
@@ -12,7 +12,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111317;
     --fg: #e8eaee;
     --muted: #9aa1ad;
@@ -21,7 +21,20 @@
     --accent: #5b9bff;
     --accent-fg: #0b0d10;
     --warn: #f0b84a;
+    color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #111317;
+  --fg: #e8eaee;
+  --muted: #9aa1ad;
+  --line: #2c3038;
+  --panel: #1a1d23;
+  --accent: #5b9bff;
+  --accent-fg: #0b0d10;
+  --warn: #f0b84a;
+  color-scheme: dark;
 }
 
 * {
