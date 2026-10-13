@@ -136,9 +136,23 @@ export class EditorView {
     this.keysEl = this.buildKeys();
     window.addEventListener("keydown", (e) => this.onLearnKey(e), true);
 
+    // Dedykacja tylko w edytorze: odtwarzacz zasłania edytor, więc nie rozprasza przy czytaniu i nie trafia do nagrania.
+    const header = el(
+      "header",
+      { className: "app-header" },
+      el(
+        "div",
+        { className: "brand" },
+        el("img", { src: "./icon.svg", alt: "", width: 36, height: 36, className: "brand-icon" }),
+        el("h1", { textContent: "Prompter" }),
+      ),
+      el("p", { className: "dedication" }, el("span", { className: "dedication-heart", ariaHidden: "true", textContent: "♥" }), "Dla Moniki"),
+    );
+
     this.root = el(
       "div",
       { className: "editor" },
+      header,
       el(
         "aside",
         { className: "library" },
@@ -152,7 +166,6 @@ export class EditorView {
       el(
         "main",
         { className: "compose" },
-        el("h1", { textContent: "Prompter" }),
         this.titleInput,
         this.bodyInput,
         el("div", { className: "actions" }, startBtn, importBtn, txtBtn, deleteBtn, fileInput, this.estimate),
