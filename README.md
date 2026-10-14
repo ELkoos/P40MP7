@@ -4,7 +4,7 @@ Autonomiczny prompter tekstu (PWA, offline, bez backendu). Projekt: [dokument pr
 
 ## Funkcje (wersja 0.2)
 
-- Edytor z biblioteką tekstów zapisywaną lokalnie (IndexedDB), import .txt, zapamiętanie ostatniej pozycji.
+- Edytor z biblioteką tekstów zapisywaną lokalnie (IndexedDB), import tekstu z plików .txt, .docx, .odt, .rtf i .pdf (offline; PDF musi mieć warstwę tekstową, skany wymagają OCR; stary .doc nieobsługiwany), zapamiętanie ostatniej pozycji.
 - Tryb A: przewijanie z linią odczytu w stałym miejscu ekranu.
 - Tryb B: jedno słowo, litera ORP zawsze w tym samym punkcie; w pauzie pod słowem widać całe zdanie z wyróżnionym bieżącym słowem.
 - Prędkość 50–1000 słów/min, zmiana w trakcie bez skoku tekstu, rozbieg po starcie i pauzie, odliczanie.

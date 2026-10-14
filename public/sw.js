@@ -1,7 +1,7 @@
 // Service Worker: praca offline po pierwszym załadowaniu (N-01).
 // Nawigacja: najpierw sieć (żeby dostać nową wersję), przy braku sieci kopia z cache.
 // Pozostałe pliki z tego samego źródła: najpierw cache, w tle zapis z sieci.
-const CACHE = "prompter-v2";
+const CACHE = "prompter-v3";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 // Pliki zbudowane przez Vite mają w nazwie skrót treści, więc ich listę bierzemy z index.html.
@@ -9,7 +9,14 @@ async function precache() {
   const cache = await caches.open(CACHE);
   const html = await (await fetch("./index.html", { cache: "no-store" })).text();
   const assets = [...html.matchAll(/(?:src|href)="(\.\/assets\/[^"]+)"/g)].map((m) => m[1]);
-  await cache.addAll([...CORE, ...assets]);
+  // Pliki ładowane dynamicznie (np. pdf.js do importu PDF): lista z precache.json, tworzona przy budowaniu.
+  let lazy = [];
+  try {
+    lazy = await (await fetch("./precache.json", { cache: "no-store" })).json();
+  } catch {
+    lazy = [];
+  }
+  await cache.addAll([...new Set([...CORE, ...assets, ...lazy])]);
 }
 
 self.addEventListener("install", (event) => {
