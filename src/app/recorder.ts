@@ -133,6 +133,8 @@ export class RecordingController {
     host: HTMLElement,
     private settings: Settings,
     private title: string,
+    /** Zatrzymanie nagrania przez użytkownika (STOP, R, pilot) pauzuje też tekst i mikrofon. */
+    private onUserStop: () => void = () => undefined,
   ) {
     this.preview = document.createElement("video");
     this.preview.className = "cam-preview";
@@ -158,8 +160,7 @@ export class RecordingController {
     this.stopBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.stopBtn.blur();
-      window.clearTimeout(this.tailTimer);
-      void this.stop();
+      this.userStop();
     });
     this.toast = document.createElement("div");
     this.toast.className = "rec-toast";
@@ -222,8 +223,14 @@ export class RecordingController {
 
   toggle(): void {
     window.clearTimeout(this.tailTimer);
-    if (this.recording) void this.stop();
+    if (this.recording) this.userStop();
     else this.start();
+  }
+
+  private userStop(): void {
+    window.clearTimeout(this.tailTimer);
+    this.onUserStop();
+    void this.stop();
   }
 
   togglePreview(): void {
