@@ -1,10 +1,11 @@
 import { buildSchedule, DEFAULT_RAMP, remainingMs, tokenize, wpmForDuration, WPM_MAX, WPM_MIN } from "../core";
-import { makeBackup, mergeScripts, parseBackup, safeFileName } from "./backup";
+import { makeBackup, mergeScripts, parseBackupFile, safeFileName } from "./backup";
 import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey, type Command } from "./keys";
+import { digitStepper, field, rangeControl, segmented } from "./controls";
 import { durationFromParts } from "./duration";
 import { Player } from "./player";
 import { RecordingSettingsPanel } from "./recorder";
-import { saveSettings, wpmFor, type Settings } from "./settings";
+import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
 import { speechSupport } from "./speech";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
 import { extractText, IMPORT_ACCEPT, ImportError, titleFromFileName } from "./textimport";
@@ -42,13 +43,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
   return e;
 }
 
-function field(label: string, control: HTMLElement, hint?: string): HTMLLabelElement {
-  const l = el("label", { className: "field" }, el("span", { className: "field-label" }, label), control);
-  if (hint) l.append(el("span", { className: "field-hint" }, hint));
-  return l;
-}
-
-function withNote(label: HTMLLabelElement, note: HTMLElement): HTMLLabelElement {
+function withNote(label: HTMLElement, note: HTMLElement): HTMLElement {
   label.append(note);
   return label;
 }
@@ -113,11 +108,11 @@ export class EditorView {
     });
 
     // E1: kopia całej biblioteki i pojedynczy tekst do pliku.
-    const exportBtn = el("button", { type: "button", textContent: "Eksportuj wszystkie (.json)" });
+    const exportBtn = el("button", { type: "button", textContent: "Eksport ustawień" });
     exportBtn.addEventListener("click", () => void this.exportLibrary());
     const backupInput = el("input", { type: "file", accept: ".json,application/json", hidden: true });
     backupInput.addEventListener("change", () => void this.importBackup(backupInput));
-    const restoreBtn = el("button", { type: "button", textContent: "Importuj kopię (.json)" });
+    const restoreBtn = el("button", { type: "button", textContent: "Import ustawień" });
     restoreBtn.addEventListener("click", () => backupInput.click());
     const txtBtn = el("button", { type: "button", textContent: "Pobierz .txt" });
     txtBtn.addEventListener("click", () => this.downloadTxt());
@@ -178,24 +173,33 @@ export class EditorView {
       this.updateEstimate();
     };
 
-    const mode = el("select", {}, el("option", { value: "A", textContent: "A: przewijanie z linią odczytu" }), el("option", { value: "B", textContent: "B: jedno słowo w stałym punkcie" }));
-    mode.value = s.mode;
-
-    const wpm = el("input", { type: "number", min: String(WPM_MIN), max: String(WPM_MAX), step: "10" });
-    const syncWpm = () => (wpm.value = String(wpmFor(s)));
-    syncWpm();
-    mode.addEventListener("change", () => {
-      s.mode = mode.value as Settings["mode"];
-      syncWpm();
-      save();
+    // Suwak z krokiem 1, bo dopasowanie do czasu daje dowolną wartość; przyciski −/+ co 10.
+    const wpm = rangeControl({
+      value: wpmFor(s),
+      min: WPM_MIN,
+      max: WPM_MAX,
+      step: 1,
+      buttonStep: 10,
+      unit: "",
+      onChange: (v) => {
+        if (s.mode === "A") s.wpmA = v;
+        else s.wpmB = v;
+        save();
+      },
     });
-    wpm.addEventListener("change", () => {
-      const v = Math.min(WPM_MAX, Math.max(WPM_MIN, Number(wpm.value) || wpmFor(s)));
-      wpm.value = String(v);
-      if (s.mode === "A") s.wpmA = v;
-      else s.wpmB = v;
-      save();
-    });
+    const syncWpm = () => wpm.set(wpmFor(s));
+    const mode = segmented(
+      [
+        ["A", "A: przewijanie"],
+        ["B", "B: jedno słowo"],
+      ],
+      s.mode,
+      (v) => {
+        s.mode = v;
+        syncWpm();
+        save();
+      },
+    );
 
     // Dopasowanie prędkości do zadanego czasu (porównanie z rynkiem: Teleprompter.com, Teleprompter Pro, PrompterPal).
     // Dwa pola z samymi cyframi: klawiatura numeryczna na telefonie nie ma znaku „:”.
@@ -207,6 +211,8 @@ export class EditorView {
     };
     const targetMin = digits("3", 3, "Minuty");
     const targetSec = digits("30", 2, "Sekundy");
+    const minStepper = digitStepper(targetMin, { min: 0, max: 999, step: 1, label: "Minuty", unit: "min" });
+    const secStepper = digitStepper(targetSec, { min: 0, max: 55, step: 5, label: "Sekundy", unit: "s" });
     const fitBtn = el("button", { type: "button", textContent: "Dopasuj prędkość" });
     const fitNote = el("span", { className: "field-hint" });
     const fit = () => {
@@ -238,39 +244,66 @@ export class EditorView {
       });
     }
 
-    const range = (value: number, min: number, max: number, step: number, set: (v: number) => void, unit: string) => {
-      const input = el("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(value) });
-      const out = el("output", { textContent: `${value}${unit}` });
-      input.addEventListener("input", () => {
-        set(Number(input.value));
-        out.textContent = `${input.value}${unit}`;
+    const range = (value: number, min: number, max: number, step: number, set: (v: number) => void, unit: string) =>
+      rangeControl({
+        value,
+        min,
+        max,
+        step,
+        unit,
+        onChange: (v) => {
+          set(v);
+          save();
+        },
+      }).el;
+
+    // Rozmiar czcionki: przełącznik „automatycznie” albo suwak z własną wartością.
+    const fontRange = rangeControl({
+      value: effectiveFontSize(s),
+      min: 16,
+      max: 160,
+      step: 2,
+      unit: " px",
+      onChange: (v) => {
+        s.fontSizePx = v;
+        fontAuto.checked = false;
+        fontRange.el.classList.remove("is-auto");
         save();
-      });
-      return el("span", { className: "range" }, input, out);
-    };
-
-    const fontSize = el("input", { type: "number", min: "16", max: "160", step: "2", placeholder: "auto" });
-    fontSize.value = s.fontSizePx === null ? "" : String(s.fontSizePx);
-    fontSize.addEventListener("change", () => {
-      const v = fontSize.value.trim() === "" ? null : Math.min(160, Math.max(16, Number(fontSize.value)));
-      s.fontSizePx = v === null || Number.isNaN(v) ? null : v;
-      fontSize.value = s.fontSizePx === null ? "" : String(s.fontSizePx);
+      },
+    });
+    const fontAuto = el("input", { type: "checkbox", checked: s.fontSizePx === null });
+    fontAuto.addEventListener("change", () => {
+      s.fontSizePx = fontAuto.checked ? null : Number(fontRange.input.value);
+      fontRange.el.classList.toggle("is-auto", fontAuto.checked);
       save();
     });
+    fontRange.el.classList.toggle("is-auto", s.fontSizePx === null);
+    const fontSize = el("div", { className: "font-size" }, el("label", { className: "switch-row" }, fontAuto, "Automatycznie"), fontRange.el);
 
-    const font = el("select", {}, el("option", { value: "sans", textContent: "Bezszeryfowy" }), el("option", { value: "serif", textContent: "Szeryfowy" }), el("option", { value: "mono", textContent: "Stałej szerokości" }));
-    font.value = s.font;
-    font.addEventListener("change", () => {
-      s.font = font.value as Settings["font"];
-      save();
-    });
+    const font = segmented(
+      [
+        ["sans", "Bezszeryfowy"],
+        ["serif", "Szeryfowy"],
+        ["mono", "Stała szer."],
+      ],
+      s.font,
+      (v) => {
+        s.font = v;
+        save();
+      },
+    );
 
-    const theme = el("select", {}, el("option", { value: "dark", textContent: "Jasny tekst na czarnym" }), el("option", { value: "light", textContent: "Ciemny tekst na białym" }));
-    theme.value = s.theme;
-    theme.addEventListener("change", () => {
-      s.theme = theme.value as Settings["theme"];
-      save();
-    });
+    const theme = segmented(
+      [
+        ["dark", "Jasny na czarnym"],
+        ["light", "Ciemny na białym"],
+      ],
+      s.theme,
+      (v) => {
+        s.theme = v;
+        save();
+      },
+    );
 
     const showNext = el("input", { type: "checkbox", checked: s.showNext });
     showNext.addEventListener("change", () => {
@@ -303,10 +336,10 @@ export class EditorView {
         "div",
         { className: "settings-grid" },
         field("Tryb", mode),
-        field("Prędkość, słów/min", wpm, `Zakres ${WPM_MIN}–${WPM_MAX}; osobno dla każdego trybu`),
-        withNote(field("Czas docelowy", el("span", { className: "duration" }, targetMin, "min", targetSec, "s", fitBtn)), fitNote),
+        field("Prędkość, słów/min", wpm.el, `Zakres ${WPM_MIN}–${WPM_MAX}; osobno dla każdego trybu`),
+        withNote(field("Czas docelowy", el("span", { className: "duration" }, minStepper, secStepper, fitBtn)), fitNote),
         field("Punkt odczytu od góry", range(s.focusPct, 10, 90, 1, (v) => (s.focusPct = v), "%"), "Bliżej kamery = wyżej"),
-        field("Rozmiar czcionki, px", fontSize, "Puste = auto (48 px, na wąskim ekranie 32 px)"),
+        field("Rozmiar czcionki", fontSize, "Automatycznie: 48 px, na wąskim ekranie 32 px"),
         field("Interlinia", range(s.lineHeight, 1.1, 2, 0.1, (v) => (s.lineHeight = v), "")),
         field("Szerokość kolumny (tryb A)", range(s.columnCh, 20, 100, 1, (v) => (s.columnCh = v), " zn.")),
         field("Krój", font),
@@ -394,8 +427,8 @@ export class EditorView {
     await this.saveNow();
     const list = await this.store.list();
     const date = new Date().toISOString().slice(0, 10);
-    downloadFile(`prompter-kopia-${date}.json`, JSON.stringify(makeBackup(list, Date.now()), null, 2), "application/json");
-    this.libraryStatus.textContent = `Wyeksportowano ${list.length} tekst(y/ów).`;
+    downloadFile(`prompter-kopia-${date}.json`, JSON.stringify(makeBackup(list, Date.now(), this.settings), null, 2), "application/json");
+    this.libraryStatus.textContent = `Wyeksportowano ustawienia i ${list.length} tekst(y/ów).`;
   }
 
   private async importBackup(input: HTMLInputElement): Promise<void> {
@@ -403,11 +436,19 @@ export class EditorView {
     input.value = "";
     if (!file) return;
     try {
-      const incoming = parseBackup(await file.text());
+      const { scripts: incoming, settings } = parseBackupFile(await file.text());
       await this.saveNow();
       const result = mergeScripts(await this.store.list(), incoming);
       for (const s of result.toWrite) await this.store.put(s);
-      this.libraryStatus.textContent = `Import: dodano ${result.added}, zaktualizowano ${result.updated}, bez zmian ${result.unchanged}.`;
+      // Ustawienia z pliku zastępują bieżące; ten sam obiekt, bo trzymają go panele i odtwarzacz.
+      if (settings) {
+        Object.assign(this.settings, settings);
+        saveSettings(this.settings);
+        this.refreshSettingsUi();
+      }
+      this.libraryStatus.textContent =
+        `Import: ${settings ? "ustawienia wczytane" : "plik bez ustawień, bieżące bez zmian"}; ` +
+        `teksty: dodano ${result.added}, zaktualizowano ${result.updated}, bez zmian ${result.unchanged}.`;
       await this.renderLibrary();
     } catch (err) {
       this.libraryStatus.textContent = `Import nieudany: ${err instanceof Error ? err.message : String(err)}`;
@@ -538,17 +579,23 @@ export class EditorView {
       s.lastWord = lastWord;
       await this.store.put(s);
       this.root.hidden = false;
-      // Tryb i prędkość mogły zmienić się w odtwarzaczu.
-      const fresh = this.buildSettings();
-      this.settingsEl.replaceWith(fresh);
-      this.settingsEl = fresh;
-      // Punkt odczytu i kolumna przy nagrywaniu mogły zmienić się w odtwarzaczu (E3).
-      const panel = new RecordingSettingsPanel(this.settings);
-      panel.el.open = this.recordingPanel.el.open;
-      this.recordingPanel.el.replaceWith(panel.el);
-      this.recordingPanel = panel;
-      this.refreshKeys();
-      this.updateEstimate();
+      // Tryb, prędkość, punkt odczytu i kolumna mogły zmienić się w odtwarzaczu (E3).
+      this.refreshSettingsUi();
     }, s.title);
+  }
+
+  /** Przebudowa paneli ustawień po zmianie this.settings poza nimi (odtwarzacz, import). */
+  private refreshSettingsUi(): void {
+    const fresh = this.buildSettings();
+    (fresh as HTMLDetailsElement).open = (this.settingsEl as HTMLDetailsElement).open;
+    this.settingsEl.replaceWith(fresh);
+    this.settingsEl = fresh;
+    this.recordingPanel.stopPreview();
+    const panel = new RecordingSettingsPanel(this.settings);
+    panel.el.open = this.recordingPanel.el.open;
+    this.recordingPanel.el.replaceWith(panel.el);
+    this.recordingPanel = panel;
+    this.refreshKeys();
+    this.updateEstimate();
   }
 }

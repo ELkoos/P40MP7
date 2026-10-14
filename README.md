@@ -10,7 +10,7 @@ Autonomiczny prompter tekstu (PWA, offline, bez backendu). Projekt: [dokument pr
 - Prędkość 50–1000 słów/min, zmiana w trakcie bez skoku tekstu, rozbieg po starcie i pauzie, odliczanie.
 - Dopasowanie prędkości do zadanego czasu (osobne pola minut i sekund, np. 3 i 30), z uwzględnieniem rozbiegu.
 - Sterowanie: klawiatura, pilot prezentacyjny (PageUp, PageDown, B, kropka, F5), dotyk, przyciski na ekranie.
-- Kopia całej biblioteki do pliku .json i import z niej (nowsza wersja tekstu wygrywa), pobranie bieżącego tekstu jako .txt.
+- „Eksport ustawień” i „Import ustawień”: plik .json z ustawieniami i całą biblioteką tekstów (import zastępuje ustawienia, przy tekstach nowsza wersja wygrywa; starsze pliki bez ustawień też się wczytują), pobranie bieżącego tekstu jako .txt.
 - Zmiana wyglądu w trakcie odtwarzania: czcionka, punkt odczytu, szerokość kolumny, bez zatrzymywania.
 - Uczenie klawiszy: dowolny przycisk pilota można przypisać do akcji w sekcji „Sterowanie i pilot”.
 - Ikony PNG 192 i 512 px oraz ikona dla iOS (instalacja PWA).

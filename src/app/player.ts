@@ -80,6 +80,8 @@ export class Player {
   ) {
     this.el = document.createElement("div");
     this.el.className = `player theme-${settings.theme}`;
+    // Na telefonie pionowa kolumna przycisków rezerwuje miejsce na STOP nagrywania.
+    this.el.classList.toggle("has-rec", settings.record);
     this.stage = document.createElement("div");
     this.stage.className = "stage";
     this.overlay = document.createElement("div");

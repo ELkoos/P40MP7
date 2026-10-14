@@ -1,15 +1,22 @@
+import { normalizeSettings, type Settings } from "./settings";
 import type { Script } from "./storage";
 
-/** Kopia biblioteki tekstów (E1). Plik JSON bez danych spoza aplikacji. */
+/**
+ * Kopia ustawień i biblioteki tekstów (E1). Plik JSON bez danych spoza aplikacji.
+ * `settings` doszło później: starsze pliki go nie mają i nadal się wczytują.
+ */
 export interface Backup {
   format: "prompter-backup";
   version: 1;
   exportedAt: number;
+  settings?: Settings;
   scripts: Script[];
 }
 
-export function makeBackup(scripts: readonly Script[], now: number): Backup {
-  return { format: "prompter-backup", version: 1, exportedAt: now, scripts: scripts.map((s) => ({ ...s })) };
+export function makeBackup(scripts: readonly Script[], now: number, settings?: Settings): Backup {
+  const b: Backup = { format: "prompter-backup", version: 1, exportedAt: now, scripts: scripts.map((s) => ({ ...s })) };
+  if (settings) b.settings = { ...settings, keyMap: { ...settings.keyMap } };
+  return b;
 }
 
 function isScript(x: unknown): x is Script {
@@ -28,6 +35,11 @@ function isScript(x: unknown): x is Script {
 
 /** Odczyt pliku kopii; rzuca Error z komunikatem dla użytkownika. */
 export function parseBackup(text: string): Script[] {
+  return parseBackupFile(text).scripts;
+}
+
+/** Odczyt pliku kopii z ustawieniami (null, gdy plik ich nie ma); rzuca Error z komunikatem dla użytkownika. */
+export function parseBackupFile(text: string): { scripts: Script[]; settings: Settings | null } {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -40,7 +52,12 @@ export function parseBackup(text: string): Script[] {
   if (!Array.isArray(b.scripts)) throw new Error("Kopia nie zawiera listy tekstów.");
   const bad = b.scripts.findIndex((s) => !isScript(s));
   if (bad >= 0) throw new Error(`Tekst nr ${bad + 1} w kopii ma niepoprawny format.`);
-  return b.scripts.map((s) => ({ ...s, lastWord: Math.max(0, Math.floor(s.lastWord)) }));
+  let settings: Settings | null = null;
+  if (b.settings !== undefined) {
+    settings = normalizeSettings(b.settings);
+    if (!settings) throw new Error("Ustawienia w kopii mają niepoprawny format.");
+  }
+  return { scripts: b.scripts.map((s) => ({ ...s, lastWord: Math.max(0, Math.floor(s.lastWord)) })), settings };
 }
 
 export interface MergeResult {

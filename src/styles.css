@@ -373,7 +373,7 @@ details[open] > summary::after {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 16px 24px;
   padding: 12px 0 4px;
   border-top: 1px solid var(--line);
@@ -406,24 +406,197 @@ details[open] > summary::after {
   min-width: 0;
 }
 
-.duration {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.field .duration input[type="text"] {
-  width: 4.5em;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
 .range output {
   min-width: 56px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
+}
+
+/* ---------- Kontrolki pod dotyk ---------- */
+
+button.step {
+  flex: none;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 500;
+  border-radius: 12px;
+  touch-action: manipulation;
+}
+
+.range input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 44px;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.range input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.range input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.range input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 26px;
+  height: 26px;
+  margin-top: -10px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.range input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.range.is-auto input[type="range"],
+.range.is-auto output {
+  opacity: 0.45;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.segmented button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  font-size: 14px;
+  line-height: 1.2;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  touch-action: manipulation;
+}
+
+.segmented button[aria-checked="true"] {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.duration {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field .stepper input[type="text"] {
+  width: 3.6em;
+  min-height: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepper-unit {
+  color: var(--muted);
+  font-size: 14px;
+  margin-left: 2px;
+}
+
+/* Przełącznik zamiast pola wyboru. */
+.field input[type="checkbox"],
+.switch-row input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 32px;
+  margin: 6px 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.field input[type="checkbox"]::after,
+.switch-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s;
+}
+
+.field input[type="checkbox"]:checked,
+.switch-row input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+.field input[type="checkbox"]:checked::after,
+.switch-row input[type="checkbox"]:checked::after {
+  transform: translateX(20px);
+}
+
+.field input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.font-size {
+  display: grid;
+  gap: 2px;
+}
+
+.field select {
+  min-height: 44px;
 }
 
 .library-backup {
@@ -868,4 +1041,97 @@ button.key-chip.custom {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.25);
   color: #fff;
+}
+
+/* ---------- Telefon: przyciski w pionowej kolumnie przy lewej krawędzi ----------
+   Kolumna ma własny pas ekranu: scena (tekst, linia odczytu) zaczyna się za nim, więc
+   przyciski niczego nie zasłaniają. To elementy ekranu, nie obraz z kamery: nie trafiają do nagrania. */
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
+  .player {
+    --rail: calc(60px + env(safe-area-inset-left));
+    /* Tło pasa kolumny na całej wysokości, także pod STOP. */
+    background: linear-gradient(to right, #15171c calc(var(--rail) - 1px), rgba(255, 255, 255, 0.12) calc(var(--rail) - 1px) var(--rail), var(--p-bg) var(--rail));
+  }
+  .player .stage {
+    left: var(--rail);
+  }
+  .player .hud {
+    top: 0;
+    bottom: 0;
+    right: auto;
+    width: var(--rail);
+    padding: calc(8px + env(safe-area-inset-top)) 0 calc(8px + env(safe-area-inset-bottom)) env(safe-area-inset-left);
+    background: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* Kolumna zawsze dostępna; w trakcie odczytu przygaszona. */
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Przewijana część kolumny kończy się nad miejscem na STOP. */
+  .player.has-rec .hud {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    padding-bottom: 4px;
+  }
+  .player .hud:not(.visible) .toolbar button {
+    opacity: 0.5;
+  }
+  .player .toolbars {
+    gap: 4px;
+  }
+  .player .toolbar {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+  }
+  .player .toolbar + .toolbar {
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    padding-top: 4px;
+  }
+  .player .toolbar button {
+    width: 48px;
+    min-width: 48px;
+    min-height: 44px;
+    padding: 0;
+  }
+  /* Informacja o stanie: pasek u dołu sceny, tylko gdy pasek jest „widoczny” (pauza, dotyk). */
+  .player .hud-info {
+    position: fixed;
+    left: var(--rail);
+    right: 0;
+    bottom: 0;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.85) 35%);
+    color: #fff;
+    font-size: 13px;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  .player .hud:not(.visible) .hud-info {
+    opacity: 0;
+  }
+  /* STOP nagrywania na dole tej samej kolumny. */
+  .player .rec-stop {
+    left: calc(4px + env(safe-area-inset-left));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: 52px;
+    min-width: 52px;
+    min-height: 60px;
+    padding: 4px 0;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: normal;
+    background: #c4161c;
+    border-color: #fff;
+    z-index: 4;
+  }
+  .player .rec-badge {
+    left: calc(var(--rail) + 8px);
+    max-width: calc(100% - var(--rail) - 16px - min(28vw, 320px) - 12px);
+  }
 }
