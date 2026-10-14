@@ -7,6 +7,7 @@ import { RecordingSettingsPanel } from "./recorder";
 import { saveSettings, wpmFor, type Settings } from "./settings";
 import { speechSupport } from "./speech";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
+import { extractText, IMPORT_ACCEPT, ImportError, titleFromFileName } from "./textimport";
 
 /** Pobranie pliku wygenerowanego w przeglądarce, bez serwera (E1). */
 function downloadFile(name: string, text: string, mime: string): void {
@@ -82,9 +83,9 @@ export class EditorView {
     startBtn.addEventListener("click", () => this.start());
     const newBtn = el("button", { type: "button", textContent: "Nowy tekst" });
     newBtn.addEventListener("click", () => this.newScript());
-    const fileInput = el("input", { type: "file", accept: ".txt,text/plain", hidden: true });
+    const fileInput = el("input", { type: "file", accept: IMPORT_ACCEPT, hidden: true });
     fileInput.addEventListener("change", () => this.importFile(fileInput));
-    const importBtn = el("button", { type: "button", textContent: "Importuj .txt" });
+    const importBtn = el("button", { type: "button", textContent: "Importuj plik", title: "TXT, DOCX, ODT, RTF, PDF" });
     importBtn.addEventListener("click", () => fileInput.click());
     // Potwierdzenie w samym przycisku zamiast window.confirm (nie działa w osadzonych widokach).
     const deleteBtn = el("button", { type: "button", textContent: "Usuń" });
@@ -489,9 +490,16 @@ export class EditorView {
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
-    const text = await file.text();
+    let text: string;
+    try {
+      text = await extractText(file);
+    } catch (e) {
+      this.libraryStatus.textContent = e instanceof ImportError ? e.message : `Nie udało się zaimportować pliku ${file.name}.`;
+      return;
+    }
     this.newScript();
-    this.titleInput.value = file.name.replace(/\.txt$/i, "");
+    this.titleInput.value = titleFromFileName(file.name);
+    this.libraryStatus.textContent = "";
     this.bodyInput.value = text;
     this.updateEstimate();
     await this.saveNow();
