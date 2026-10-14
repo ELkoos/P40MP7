@@ -94,7 +94,7 @@ export class Player {
     this.hud.append(this.hudInfo, this.buildToolbar());
     this.el.append(this.stage, this.overlay, this.hud);
     host.appendChild(this.el);
-    if (settings.record) this.rec = new RecordingController(this.el, settings, title);
+    if (settings.record) this.rec = new RecordingController(this.el, settings, title, () => this.pause());
 
     this.build(startWord);
     if (settings.followVoice && speechSupport().ok) {
