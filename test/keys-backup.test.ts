@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { makeBackup, mergeScripts, parseBackup, safeFileName } from "../src/app/backup";
+import { makeBackup, mergeScripts, parseBackup, parseBackupFile, safeFileName } from "../src/app/backup";
+import { DEFAULT_SETTINGS } from "../src/app/settings";
 import { assignKey, defaultKeysFor, keyId, keyLabel, resolveCommand, unassignKey } from "../src/app/keys";
 import type { Script } from "../src/app/storage";
 
@@ -54,6 +55,26 @@ describe("kopia biblioteki", () => {
     expect(() => parseBackup('{"format":"prompter-backup","version":2,"scripts":[]}')).toThrow("wersja");
     expect(() => parseBackup('{"format":"prompter-backup","version":1}')).toThrow("listy");
     expect(() => parseBackup('{"format":"prompter-backup","version":1,"scripts":[{"id":"a"}]}')).toThrow("nr 1");
+  });
+
+  it("kopia z ustawieniami: eksport i import zachowują ustawienia i teksty", () => {
+    const settings = { ...DEFAULT_SETTINGS, wpmA: 173, theme: "light" as const, keyMap: { "key:KeyQ": "toggle" as const } };
+    const r = parseBackupFile(JSON.stringify(makeBackup([s("a", 1)], 0, settings)));
+    expect(r.settings).toEqual(settings);
+    expect(r.scripts.map((x) => x.id)).toEqual(["a"]);
+  });
+
+  it("starsza kopia bez ustawień: teksty wczytane, ustawienia null", () => {
+    const r = parseBackupFile(JSON.stringify(makeBackup([s("a", 1)], 0)));
+    expect(r.settings).toBeNull();
+    expect(r.scripts).toHaveLength(1);
+  });
+
+  it("brakujące pola ustawień uzupełnia domyślnymi, zła wersja ustawień to błąd", () => {
+    const text = (settings: unknown) => JSON.stringify({ format: "prompter-backup", version: 1, exportedAt: 0, settings, scripts: [] });
+    expect(parseBackupFile(text({ version: 1, wpmA: 200 })).settings).toEqual({ ...DEFAULT_SETTINGS, wpmA: 200 });
+    expect(() => parseBackupFile(text({ version: 2 }))).toThrow("Ustawienia");
+    expect(() => parseBackupFile(text("x"))).toThrow("Ustawienia");
   });
 
   it("parseBackup normalizuje lastWord", () => {

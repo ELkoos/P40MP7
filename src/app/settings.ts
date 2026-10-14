@@ -100,13 +100,19 @@ export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    if (parsed.version !== 1) return { ...DEFAULT_SETTINGS };
-    const keyMap = typeof parsed.keyMap === "object" && parsed.keyMap !== null ? parsed.keyMap : {};
-    return { ...DEFAULT_SETTINGS, ...parsed, keyMap };
+    return normalizeSettings(JSON.parse(raw)) ?? { ...DEFAULT_SETTINGS };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+/** Ustawienia z zapisu (localStorage, plik kopii) uzupełnione domyślnymi; null, gdy to nie są ustawienia v1. */
+export function normalizeSettings(data: unknown): Settings | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const parsed = data as Partial<Settings>;
+  if (parsed.version !== 1) return null;
+  const keyMap = typeof parsed.keyMap === "object" && parsed.keyMap !== null ? parsed.keyMap : {};
+  return { ...DEFAULT_SETTINGS, ...parsed, keyMap };
 }
 
 export function saveSettings(s: Settings): void {

@@ -7,6 +7,7 @@ import {
   videoBitrateFor,
 } from "../core/recording";
 import { saveSettings, type Settings } from "./settings";
+import { field, rangeControl, segmented } from "./controls";
 
 /** Czas nagrywania po końcu tekstu przy automatycznym zatrzymaniu, ms [H]. */
 const TAIL_MS = 2000;
@@ -398,11 +399,6 @@ export class RecordingSettingsPanel {
       e.append(...children);
       return e;
     };
-    const field = (label: string, control: HTMLElement, hint?: string) => {
-      const l = make("label", { className: "field" }, make("span", { className: "field-label" }, label), control);
-      if (hint) l.append(make("span", { className: "field-hint" }, hint));
-      return l;
-    };
     const check = (value: boolean, set: (v: boolean) => void) => {
       const c = make("input", { type: "checkbox", checked: value });
       c.addEventListener("change", () => {
@@ -411,36 +407,43 @@ export class RecordingSettingsPanel {
       });
       return c;
     };
-    const range = (value: number, min: number, max: number, set: (v: number) => void, unit: string) => {
-      const input = make("input", { type: "range", min: String(min), max: String(max), step: "1", value: String(value) });
-      const out = make("output", { textContent: `${value}${unit}` });
-      input.addEventListener("input", () => {
-        set(Number(input.value));
-        out.textContent = `${input.value}${unit}`;
+    const range = (value: number, min: number, max: number, set: (v: number) => void, unit: string) =>
+      rangeControl({
+        value,
+        min,
+        max,
+        step: 1,
+        unit,
+        onChange: (v) => {
+          set(v);
+          save();
+        },
+      }).el;
+
+    const edge = segmented<Settings["cameraEdge"]>(
+      [
+        ["top", "Nad ekranem"],
+        ["left", "Z lewej"],
+        ["right", "Z prawej"],
+      ],
+      s.cameraEdge,
+      (v) => {
+        s.cameraEdge = v;
         save();
-      });
-      return make("span", { className: "range" }, input, out);
-    };
-
-    const edge = make(
-      "select",
-      {},
-      make("option", { value: "top", textContent: "Nad ekranem (laptop, telefon pionowo)" }),
-      make("option", { value: "left", textContent: "Z lewej (telefon poziomo)" }),
-      make("option", { value: "right", textContent: "Z prawej (telefon poziomo)" }),
+      },
     );
-    edge.value = s.cameraEdge;
-    edge.addEventListener("change", () => {
-      s.cameraEdge = edge.value as Settings["cameraEdge"];
-      save();
-    });
 
-    const quality = make("select", {}, make("option", { value: "1080", textContent: "1080p" }), make("option", { value: "720", textContent: "720p" }));
-    quality.value = String(s.recHeight);
-    quality.addEventListener("change", () => {
-      s.recHeight = quality.value === "720" ? 720 : 1080;
-      save();
-    });
+    const quality = segmented<"1080" | "720">(
+      [
+        ["1080", "1080p"],
+        ["720", "720p"],
+      ],
+      s.recHeight === 720 ? "720" : "1080",
+      (v) => {
+        s.recHeight = v === "720" ? 720 : 1080;
+        save();
+      },
+    );
 
     this.camSelect = make("select");
     this.micSelect = make("select");
@@ -474,7 +477,7 @@ export class RecordingSettingsPanel {
         "div",
         { className: "settings-grid" },
         field("Nagrywaj podczas czytania", check(s.record, (v) => (s.record = v)), "Tekst przesuwa się bliżej kamery, plik zapisuje się na urządzeniu"),
-        field("Gdzie jest kamera", edge),
+        field("Gdzie jest kamera", edge, "Z boku: telefon poziomo"),
         field("Kamera u góry: punkt odczytu od góry", range(s.recFocusPct, 3, 40, (v) => (s.recFocusPct = v), "%"), "Mniej = bliżej obiektywu"),
         field("Kamera z boku: kolumna od krawędzi", range(s.recSideAnchorPct, 10, 50, (v) => (s.recSideAnchorPct = v), "%")),
         field("Szerokość kolumny przy nagrywaniu", range(s.recColumnCh, 12, 60, (v) => (s.recColumnCh = v), " zn."), "Węższa = mniejszy ruch oczu na boki"),
