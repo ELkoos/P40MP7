@@ -3,6 +3,8 @@
  * W Chrome rozpoznawanie odbywa się na serwerach Google: dźwięk z mikrofonu wychodzi z urządzenia i wymaga sieci.
  */
 
+import { mergeTranscripts } from "../core/voice";
+
 /** Minimalny opis interfejsu; lib.dom nie zawiera klasy SpeechRecognition, a Chrome i Safari udostępniają ją z prefiksem. */
 interface RecognitionAlternative {
   transcript: string;
@@ -128,10 +130,10 @@ export class SpeechListener {
       this.onStatus("listening");
     };
     rec.onresult = (e) => {
-      // Hipoteza całej sesji: wyniki końcowe i bieżący pośredni, w kolejności.
+      // Hipoteza całej sesji: wyniki końcowe i bieżący pośredni, w kolejności (bez narastających powtórzeń).
       const parts: string[] = [];
       for (let i = 0; i < e.results.length; i++) parts.push(e.results[i]![0]?.transcript ?? "");
-      const words = parts.join(" ").split(/\s+/).filter((w) => w.length > 0);
+      const words = mergeTranscripts(parts);
       if (words.length > 0) this.onWords(words.slice(-TAIL_WORDS));
     };
     rec.onerror = (e) => {
