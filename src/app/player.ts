@@ -18,6 +18,8 @@ import { RsvpRenderer, ScrollRenderer, type Renderer } from "./renderers";
 import { keyId, resolveCommand, type Command } from "./keys";
 import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
 import { SpeechListener, speechSupport, type ListenerStatus } from "./speech";
+import { VoiceActivityDetector } from "./vad";
+import { VoiceLog } from "./voicelog";
 import { WakeLockHolder } from "./wakelock";
 
 export type { Command } from "./keys";
@@ -32,6 +34,10 @@ const COLUMN_STEP = 5;
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
+}
+
+function round4(x: number): number {
+  return Math.round(x * 10000) / 10000;
 }
 
 function formatTime(ms: number): string {
@@ -66,6 +72,17 @@ export class Player {
   private voice: { listener: SpeechListener; matcher: VoiceMatcher; follower: VoiceFollower } | null = null;
   private voiceStatus: ListenerStatus = "off";
   private voiceMessage = "";
+  /** Detektor głosu z mikrofonu (lokalny); null, gdy niedostępny. */
+  private vad: VoiceActivityDetector | null = null;
+  private vadStarting = false;
+  /** Diagnostyka głosu (ustawienie voiceDebug). */
+  private voiceLog: VoiceLog | null = null;
+  private debugEl: HTMLPreElement | null = null;
+  private lastHeard: string[] = [];
+  private lastMatchText = "—";
+  private lastDebugAt = 0;
+  private lastPosLogAt = 0;
+  private lastVadLogged: boolean | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -107,9 +124,16 @@ export class Player {
             this.voiceStatus = status;
             this.voiceMessage = message ?? (status === "error" ? this.voiceMessage : "");
             if (status === "error") this.showHud();
+            this.voiceLog?.add([performance.now(), "status", status, message ?? ""]);
+          },
+          () => {
+            const now = performance.now();
+            this.voice?.follower.bridgeRestart(now);
+            this.voiceLog?.add([now, "restart"]);
           },
         ),
       };
+      if (settings.voiceDebug) this.buildVoiceDebug(words);
     }
 
     this.onKey = this.onKey.bind(this);
@@ -206,7 +230,18 @@ export class Player {
 
   private frame(now: number): void {
     // Przy podążaniu za głosem zegar stoi, a p ustawia VoiceFollower.
-    if (this.voice?.listener.listening) this.clock.seek(this.voice.follower.tick(now, this.clock.p));
+    if (this.voice?.listener.listening) {
+      if (this.vad) {
+        const active = this.vad.sample(now);
+        this.voice.follower.voiceActivity(now, active);
+        if (active !== this.lastVadLogged) {
+          this.voiceLog?.add([now, "vad", active, round4(this.vad.level), round4(this.vad.noiseFloor)]);
+          this.lastVadLogged = active;
+        }
+      }
+      this.clock.seek(this.voice.follower.tick(now, this.clock.p));
+      this.updateVoiceDebug(now);
+    }
     const p = this.clock.tick(now);
     const i = tokenIndexAt(this.schedule, p);
     if (i >= 0) this.renderer?.draw(i, p);
@@ -366,11 +401,72 @@ export class Player {
     this.rec?.countdownStarted();
     this.resyncVoice(performance.now());
     this.voice.listener.start();
+    this.startVad();
     void this.wakeLock.acquire();
+  }
+
+  /** Detektor głosu: osobny dostęp do mikrofonu przez Web Audio; bez niego cisza wynika z wyników rozpoznawania. */
+  private startVad(): void {
+    if (this.vad || this.vadStarting) return;
+    this.vadStarting = true;
+    void VoiceActivityDetector.start(this.settings.micId).then((vad) => {
+      this.vadStarting = false;
+      if (!vad) return;
+      // Odtwarzacz mógł zostać zamknięty albo zatrzymany w międzyczasie.
+      if (!this.el.isConnected || !this.voice?.listener.listening) vad.stop();
+      else this.vad = vad;
+    });
+  }
+
+  private stopVad(): void {
+    this.vad?.stop();
+    this.vad = null;
+    this.lastVadLogged = null;
+  }
+
+  private buildVoiceDebug(words: string[]): void {
+    const s = this.settings;
+    this.voiceLog = new VoiceLog({ lang: s.voiceLang, latencyMs: s.voiceLatencyMs, wpm: wpmFor(s), mode: s.mode }, words);
+    const box = document.createElement("div");
+    box.className = "voice-debug";
+    this.debugEl = document.createElement("pre");
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Zapisz log";
+    save.addEventListener("pointerdown", (e) => e.stopPropagation());
+    save.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.voiceLog?.download();
+    });
+    box.append(this.debugEl, save);
+    this.el.append(box);
+  }
+
+  private updateVoiceDebug(now: number): void {
+    const v = this.voice;
+    if (!v || !this.voiceLog) return;
+    const st = v.follower.state(now);
+    const wpm = Math.round(st.rate * 60000);
+    if (now - this.lastPosLogAt >= 250) {
+      this.lastPosLogAt = now;
+      this.voiceLog.add([now, "pos", round4(this.clock.p), round4(st.goal), round4(st.target), st.mode, wpm]);
+    }
+    if (!this.debugEl || now - this.lastDebugAt < 200) return;
+    this.lastDebugAt = now;
+    const vad = this.vad ? `${this.vad.active ? "mówi" : "cisza"} (poziom ${this.vad.level.toFixed(3)}, tło ${this.vad.noiseFloor.toFixed(3)})` : "brak (cisza z wyników)";
+    this.debugEl.textContent = [
+      `słyszę: ${this.lastHeard.slice(-6).join(" ") || "—"}`,
+      `dopasowanie: ${this.lastMatchText}`,
+      `tryb: ${st.mode} · tempo ${wpm} sł./min${st.measured ? "" : " (z ustawień)"}`,
+      `od dopasowania ${(st.msSinceMatch / 1000).toFixed(1)} s · od mowy ${(st.msSinceSpeech / 1000).toFixed(1)} s`,
+      `głos z mikrofonu: ${vad}`,
+      `tekst: ${this.clock.p.toFixed(1)} · cel ${st.goal.toFixed(1)} · wynik ${st.target.toFixed(1)}`,
+    ].join("\n");
   }
 
   private resyncVoice(now: number): void {
     if (!this.voice) return;
+    this.voiceLog?.add([now, "nav", this.currentWord()]);
     this.voice.matcher.reset(this.currentWord());
     // Tempo startowe z ustawionej prędkości (słowo ≈ slot), zanim zmierzymy tempo lektora.
     this.voice.follower.reset(this.clock.p, now, wpmFor(this.settings) / 60000);
@@ -380,11 +476,18 @@ export class Player {
   private onHeard(heard: string[]): void {
     const v = this.voice;
     if (!v) return;
+    const now = performance.now();
+    // Każdy wynik ze słowami to znak, że lektor mówi, nawet jeśli słowa się nie dopasują.
+    v.follower.heard(now);
+    this.lastHeard = heard;
+    this.voiceLog?.add([now, "result", heard]);
     const match = v.matcher.update(heard);
     if (!match) return;
+    this.voiceLog?.add([now, "match", match.word, round4(match.score), match.matched]);
+    if (this.voiceLog) this.lastMatchText = `słowo ${match.word + 1} „${this.tokens.find((t) => t.sourceWord === match.word)?.text ?? "?"}” (zgodnych ${match.matched})`;
     const next = tokenIndexOfWord(this.tokens, match.word + 1);
     const slot = match.word + 1 > this.tokens[this.tokens.length - 1]!.sourceWord ? this.schedule[this.tokens.length]! : this.schedule[next]!;
-    v.follower.setTarget(slot, performance.now());
+    v.follower.setTarget(slot, now);
   }
 
   private startWithCountdown(): void {
@@ -423,6 +526,7 @@ export class Player {
 
   private pause(): void {
     if (this.voice?.listener.listening) this.voice.listener.stop();
+    this.stopVad();
     if (this.counting) this.cancelCountdown();
     this.clock.pause();
     this.wakeLock.release();
@@ -479,6 +583,7 @@ export class Player {
   destroy(): void {
     cancelAnimationFrame(this.raf);
     if (this.voice?.listener.listening) this.voice.listener.stop();
+    this.stopVad();
     window.clearInterval(this.countdownTimer);
     window.removeEventListener("keydown", this.onKey);
     document.removeEventListener("visibilitychange", this.onVisibility);
