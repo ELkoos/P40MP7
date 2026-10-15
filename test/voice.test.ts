@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/core/tokenizer";
-import { VoiceFollower, VoiceMatcher, normalizeWord, wordSimilarity } from "../src/core/voice";
+import { VoiceFollower, VoiceMatcher, normalizeWord, wordSimilarity, mergeTranscripts } from "../src/core/voice";
 
 const TEXT = `Dzień dobry, nazywam się Jan Kowalski i przygotowałem krótkie wystąpienie.
 Najpierw opowiem o tym, jak powstał projekt. Potem pokażę wyniki pomiarów.
@@ -198,5 +198,54 @@ describe("VoiceFollower", () => {
     f.setTarget(7, 3008);
     // 5 słów w 2 s = 150 sł./min
     expect(f.measuredRate(3008)! * 60000).toBeCloseTo(150, 0);
+  });
+});
+
+describe("mergeTranscripts", () => {
+  it("narastające wyniki (Chrome na Androidzie) nie dublują słów", () => {
+    // Z logu: Android 10, Chrome 155.
+    expect(mergeTranscripts(["i", "i", "i", "i raz", "i raz i dwa", "i raz i dwa i trzy"])).toEqual(["i", "raz", "i", "dwa", "i", "trzy"]);
+  });
+  it("osobne wyniki (komputer) są sklejane w kolejności", () => {
+    expect(mergeTranscripts(["Witaj w", " prompterze wpisz", ""])).toEqual(["Witaj", "w", "prompterze", "wpisz"]);
+  });
+  it("powtórzenie krótszej frazy przez lektora nie zastępuje dłuższej", () => {
+    expect(mergeTranscripts(["i raz i dwa", "i raz"])).toEqual(["i", "raz", "i", "dwa", "i", "raz"]);
+  });
+});
+
+describe("VoiceFollower: koniec wypowiedzi na Androidzie", () => {
+  // Przebieg z logu (Android 10, Chrome 155): „Witaj w prompterze”, potem koniec sesji i cisza.
+  function run(android: boolean) {
+    const f = new VoiceFollower({ latencyMs: 1000 });
+    f.reset(0, 958, 140 / 60000);
+    const results: [number, number][] = [[3546, 1], [3631, 1], [3723, 1], [3926, 1], [4125, 2], [4568, 3], [4592, 3]];
+    let p = 0;
+    let maxP = 0;
+    let back = 0;
+    for (let t = 958; t <= 7500; t += 16) {
+      for (const [rt, slot] of results) if (rt > t - 16 && rt <= t) f.setTarget(slot, rt);
+      if (t - 16 < 4594 && t >= 4594) {
+        if (android) f.speechEnded(4594);
+        else f.bridgeRestart(4594);
+      }
+      const q = f.tick(t, p);
+      back += Math.max(0, p - q);
+      p = q;
+      maxP = Math.max(maxP, p);
+    }
+    return { maxP, back, end: p };
+  }
+
+  it("tekst nie przejeżdża daleko za ostatnie słowo i prawie nie wraca", () => {
+    const r = run(true);
+    // Lektor skończył na 3. słowie (slot 3); wcześniej tekst dojeżdżał do ok. 9 i wracał do 6.
+    expect(r.maxP).toBeLessThan(5);
+    expect(r.back).toBeLessThan(1);
+    expect(r.end).toBeGreaterThanOrEqual(3);
+  });
+
+  it("bez sygnału końca wypowiedzi przejeżdża dalej (dla porównania)", () => {
+    expect(run(false).maxP).toBeGreaterThan(run(true).maxP);
   });
 });

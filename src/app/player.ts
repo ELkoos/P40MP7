@@ -36,6 +36,8 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
+const IS_ANDROID = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+
 /** Tyle ms mowy wg detektora bez żadnego wyniku rozpoznawania wyłącza detektor. */
 const VAD_NO_RESULT_MS = 4000;
 
@@ -137,7 +139,10 @@ export class Player {
           },
           () => {
             const now = performance.now();
-            this.voice?.follower.bridgeRestart(now);
+            // Android kończy sesję po każdej wypowiedzi, czyli po ciszy lektora; gdzie indziej sesja kończy się
+            // też w trakcie mowy (limit czasu), więc przerwa na wznowienie nie jest ciszą.
+            if (IS_ANDROID) this.voice?.follower.speechEnded(now);
+            else this.voice?.follower.bridgeRestart(now);
             this.voiceLog?.add([now, "restart"]);
           },
         ),
@@ -426,7 +431,7 @@ export class Player {
     if (this.vad || this.vadStarting || this.vadDisabled) return;
     // Android: drugi dostęp do mikrofonu odbiera dźwięk rozpoznawaniu mowy (log z Androida 10, Chrome 155:
     // 0 wyników przez 29 s, sesje kończone co ok. 5,4 s). Tam cisza wynika z samych wyników rozpoznawania.
-    if (/Android/i.test(navigator.userAgent)) {
+    if (IS_ANDROID) {
       this.disableVad(performance.now(), "Android: bez detektora, mikrofon tylko dla rozpoznawania");
       return;
     }

@@ -258,6 +258,9 @@ export interface VoiceFollowState {
   mode: "czeka" | "za głosem" | "z tempa" | "cisza" | "powrót";
 }
 
+/** Tempo mierzymy dopiero z wyników obejmujących tyle ms mowy (z 2–3 słów wychodziło 187 sł./min zamiast ok. 140). */
+const MIN_RATE_SPAN_MS = 1500;
+
 /**
  * Prowadzenie pozycji p za lektorem jak operator promptera: tekst przesuwa się płynnie z prędkością
  * równą zmierzonemu tempu mowy, a różnica względem rozpoznanej pozycji jest zbierana łagodnie przez
@@ -286,6 +289,8 @@ export class VoiceFollower {
    */
   private stop: number | null = null;
   private wasSilent = false;
+  /** Rozpoznawanie zgłosiło koniec wypowiedzi (Android kończy sesję po każdej): cisza do następnego wyniku. */
+  private ended = false;
   /** Łączny czas mowy od startu (bez przerw lektora), ms: zegar pomiaru tempa. */
   private speechClock = 0;
   /** Historia wyników do pomiaru tempa: [czas, cel]. */
@@ -318,6 +323,7 @@ export class VoiceFollower {
     this.talkAtSpeech = 0;
     this.stop = null;
     this.wasSilent = false;
+    this.ended = false;
     if (this.vadLast !== null) this.vadLast = now;
   }
 
@@ -342,6 +348,16 @@ export class VoiceFollower {
   heard(now: number): void {
     this.lastSpeech = Math.max(this.lastSpeech, now);
     this.talkAtSpeech = this.talkMs;
+    this.ended = false;
+  }
+
+  /**
+   * Koniec wypowiedzi wg rozpoznawania. Chrome na Androidzie kończy sesję dopiero po ciszy lektora
+   * (logi z Androida 10: sesja kończy się zaraz po wyniku końcowym), więc to pewny znak ciszy, bez czekania
+   * `silenceMs`. Ostatni wynik jest wtedy końcowy, czyli obejmuje całą wypowiedź.
+   */
+  speechEnded(_now: number): void {
+    if (this.vadLast === null) this.ended = true;
   }
 
   /**
@@ -395,18 +411,20 @@ export class VoiceFollower {
     const h = this.history;
     if (h.length >= 2) {
       const dt = h[h.length - 1]![0] - h[0]![0];
-      if (dt >= 800) return Math.min(MAX_RATE, (h[h.length - 1]![1] - h[0]![1]) / dt);
+      if (dt >= MIN_RATE_SPAN_MS) return Math.min(MAX_RATE, (h[h.length - 1]![1] - h[0]![1]) / dt);
     }
     return null;
   }
 
   private silent(now: number): boolean {
+    if (this.ended) return true;
     if (this.vadLast !== null) return !this.vadActive && now - this.vadLast > this.opt.vadSilenceMs;
     return now - this.lastSpeech > this.opt.silenceMs;
   }
 
   /** Czy lektor mówi teraz: z detektora głosu albo (bez niego) krótko po ostatnim wyniku z mową. */
   private talking(now: number): boolean {
+    if (this.ended) return false;
     if (this.vadLast !== null) return this.vadActive || now - this.vadLast <= this.opt.vadSilenceMs;
     return now - this.lastSpeech <= this.opt.speechTailMs;
   }
@@ -435,6 +453,12 @@ export class VoiceFollower {
   private stopEstimate(now: number): number {
     const rate = this.rate(now);
     if (this.vadLast !== null) return this.base(rate) + rate * Math.min(this.talkMs, this.opt.deadReckonMs);
+    if (this.ended) {
+      // Wynik końcowy obejmuje całą wypowiedź: lektor skończył przy nim, bez opóźnienia rozpoznawania.
+      const spoke = this.stop === null ? Math.max(0, this.lastSpeech - this.lastAdvance) : this.talkAtSpeech;
+      const from = this.stop ?? this.target + 0.5;
+      return Math.max(from + rate * Math.min(spoke, this.opt.deadReckonMs), this.target + 0.5);
+    }
     const half = this.stop === null ? rate * this.opt.latencyMs * 0.5 : 0;
     const est = this.base(rate) + rate * Math.min(this.talkAtSpeech, this.opt.deadReckonMs) - half;
     return Math.max(est, this.target + 0.5);
@@ -531,4 +555,22 @@ export class VoiceFollower {
     }
     return Math.max(next, Math.min(p, g));
   }
+}
+
+/**
+ * Słowa hipotezy z kolejnych wyników jednej sesji rozpoznawania. Chrome na Androidzie zwraca wyniki
+ * narastająco (każdy zawiera poprzedni, np. „i raz”, „i raz i dwa”), więc zwykłe sklejenie dubluje tekst
+ * (log z Androida 10, Chrome 155). Wynik, który zaczyna się od poprzedniego, zastępuje go.
+ */
+export function mergeTranscripts(parts: string[]): string[] {
+  const kept: string[][] = [];
+  for (const part of parts) {
+    const words = part.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length === 0) continue;
+    const prev = kept[kept.length - 1];
+    if (prev && prev.length <= words.length && prev.every((w, i) => w.toLowerCase() === words[i]!.toLowerCase())) {
+      kept[kept.length - 1] = words;
+    } else kept.push(words);
+  }
+  return kept.flat();
 }
