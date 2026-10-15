@@ -8,6 +8,7 @@ import {
 } from "../core/recording";
 import { saveSettings, type Settings } from "./settings";
 import { field, rangeControl, segmented } from "./controls";
+import { WakeLockHolder } from "./wakelock";
 
 /** Czas nagrywania po końcu tekstu przy automatycznym zatrzymaniu, ms [H]. */
 const TAIL_MS = 2000;
@@ -15,10 +16,6 @@ const TAIL_MS = 2000;
 const TIMESLICE_MS = 1000;
 /** Po tylu ms zwalniamy adres blob: pobieranie musi już trwać [H]. */
 const REVOKE_MS = 60_000;
-
-interface WakeLockLike {
-  release(): Promise<void>;
-}
 
 export function recordingSupported(): boolean {
   return typeof window !== "undefined" && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
@@ -114,6 +111,8 @@ function formatClock(ms: number): string {
 export class RecordingController {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
+  /** Zapis bieżącego nagrania, spełniany po zdarzeniu "stop" rejestratora. */
+  private saved: Promise<Recording | null> = Promise.resolve(null);
   private chunks: Blob[] = [];
   private bytes = 0;
   private startedAt = 0;
@@ -123,7 +122,7 @@ export class RecordingController {
   private playing = false;
   private previewHidden = false;
   private destroyed = false;
-  private wakeLock: WakeLockLike | null = null;
+  private wakeLock = new WakeLockHolder();
   private preview: HTMLVideoElement;
   private badge: HTMLDivElement;
   private stopBtn: HTMLButtonElement;
@@ -244,7 +243,8 @@ export class RecordingController {
   }
 
   private start(): void {
-    if (this.recording || this.destroyed) return;
+    // Także rejestrator już zatrzymany, ale jeszcze bez zapisanego pliku: nowe nagranie poczeka na zapis.
+    if (this.recorder || this.destroyed) return;
     if (!this.stream) {
       // Kamera jeszcze się otwiera: start zaraz po otwarciu.
       this.wantStart = true;
@@ -271,12 +271,15 @@ export class RecordingController {
         this.bytes += e.data.size;
       }
     });
+    // Plik zapisujemy na zdarzenie "stop", niezależnie od tego, kto zatrzymał nagrywanie: użytkownik,
+    // koniec tekstu, błąd rejestratora albo przeglądarka (np. odłączona kamera). Inaczej błąd gubił nagranie.
+    this.saved = new Promise((resolve) => rec.addEventListener("stop", () => resolve(this.finish(rec)), { once: true }));
     rec.addEventListener("error", () => void this.stop());
     rec.start(TIMESLICE_MS);
     this.recorder = rec;
     this.startedAt = performance.now();
     this.toast.hidden = true;
-    void this.requestWakeLock();
+    void this.wakeLock.acquire();
     this.renderRecording();
     this.tickTimer = window.setInterval(() => this.renderRecording(), 500);
   }
@@ -290,15 +293,18 @@ export class RecordingController {
   /** Zatrzymuje nagrywanie i od razu zapisuje plik, żeby nic nie zginęło. */
   async stop(): Promise<Recording | null> {
     const rec = this.recorder;
-    if (!rec || rec.state === "inactive") return null;
+    if (!rec) return null;
+    if (rec.state !== "inactive") rec.stop();
+    return this.saved;
+  }
+
+  private finish(rec: MediaRecorder): Recording | null {
+    if (this.recorder !== rec) return null;
     window.clearInterval(this.tickTimer);
     window.clearTimeout(this.tailTimer);
     const durationMs = performance.now() - this.startedAt;
-    const stopped = new Promise<void>((resolve) => rec.addEventListener("stop", () => resolve(), { once: true }));
-    rec.stop();
-    await stopped;
     this.recorder = null;
-    this.releaseWakeLock();
+    this.wakeLock.release();
     const mimeType = rec.mimeType || this.chunks[0]?.type || "video/webm";
     const recording: Recording = {
       blob: new Blob(this.chunks, { type: mimeType }),
@@ -355,22 +361,6 @@ export class RecordingController {
     this.stopBtn.hidden = kind !== "rec";
   }
 
-  private async requestWakeLock(): Promise<void> {
-    if (this.wakeLock) return;
-    const nav = navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<WakeLockLike> } };
-    try {
-      this.wakeLock = (await nav.wakeLock?.request("screen")) ?? null;
-    } catch {
-      this.wakeLock = null;
-    }
-  }
-
-  private releaseWakeLock(): void {
-    const lock = this.wakeLock;
-    this.wakeLock = null;
-    lock?.release().catch(() => undefined);
-  }
-
   /** Wyjście z odtwarzacza: trwające nagranie jest zatrzymywane i zapisywane, kamera wyłączana. */
   async destroy(): Promise<void> {
     this.destroyed = true;
@@ -382,7 +372,7 @@ export class RecordingController {
     } finally {
       stopStream(this.stream);
       this.stream = null;
-      this.releaseWakeLock();
+      this.wakeLock.release();
     }
   }
 }
