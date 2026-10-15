@@ -315,6 +315,11 @@ export class EditorView {
       s.followVoice = followVoice.checked;
       save();
     });
+    const voiceDebug = el("input", { type: "checkbox", checked: s.voiceDebug, disabled: !support.ok });
+    voiceDebug.addEventListener("change", () => {
+      s.voiceDebug = voiceDebug.checked;
+      save();
+    });
     const voiceLang = el(
       "select",
       { disabled: !support.ok },
@@ -357,6 +362,11 @@ export class EditorView {
           "Wyprzedzenie przy głosie",
           range(s.voiceLatencyMs, 0, 2500, 100, (v) => (s.voiceLatencyMs = v), " ms"),
           "Rozpoznawanie mowy ma opóźnienie. Czytasz dalej niż podświetlenie: zwiększ. Tekst ucieka do przodu: zmniejsz.",
+        ),
+        field(
+          "Diagnostyka głosu",
+          voiceDebug,
+          "W odtwarzaczu pokazuje, co słyszy rozpoznawanie i gdzie dopasowało tekst, oraz przycisk „Zapisz log” (plik JSON z przebiegiem; zawiera tekst i rozpoznane słowa).",
         ),
       ),
     );

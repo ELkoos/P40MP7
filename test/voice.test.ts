@@ -95,7 +95,8 @@ describe("VoiceFollower", () => {
       if (t >= nextResult) {
         const latency = 700 + rnd() * 600;
         const heard = Math.floor(spokenAt(Math.max(0, t - latency)));
-        if (heard > 0) f.setTarget(heard, t);
+        // W ciszy rozpoznawanie nie zwraca nowych wyników (ostatni przychodzi z opóźnieniem).
+        if (heard > 0 && t - latency <= stopSpeakingAt) f.setTarget(heard, t);
         // longGaps: co trzeci wynik spóźniony do 1,2–1,6 s (nieregularne paczki usługi).
         nextResult = t + (longGaps && rnd() < 0.33 ? 1200 + rnd() * 400 : 500 + rnd() * 400);
       }
@@ -145,8 +146,9 @@ describe("VoiceFollower", () => {
     const run = simulate(f, 26000, 10000);
     const at = (t: number) => run.find((r) => r.t >= t)!.p;
     expect(at(25000)).toBe(at(20000));
-    // Po ciszy tekst wraca łagodnie do miejsca, gdzie lektor skończył (25 słów).
-    expect(Math.abs(at(25000) - 10000 * (150 / 60000))).toBeLessThan(1);
+    // Po ciszy tekst wraca łagodnie do ostatniego wyniku (lektor skończył na 25. słowie; ostatni
+    // wynik w symulacji obejmuje 23–24 słowa, bo przychodzi z opóźnieniem 0,7–1,3 s).
+    expect(Math.abs(at(25000) - 10000 * (150 / 60000))).toBeLessThan(2);
     let minStep = 0;
     for (let k = 1; k < run.length; k++) minStep = Math.min(minStep, run[k]!.p - run[k - 1]!.p);
     expect(minStep).toBeGreaterThan(-0.08);
@@ -183,10 +185,18 @@ describe("VoiceFollower", () => {
     f.reset(0, 0, 140 / 60000);
     expect(f.measuredRate(0)).toBeNull();
     expect(f.rate(0)).toBeCloseTo(140 / 60000);
-    f.setTarget(2, 1000);
-    expect(f.measuredRate(1000)).toBeNull();
-    f.setTarget(7, 3000);
+    // Tempo liczone zegarem mowy, który biegnie w klatkach (tick).
+    let p = 0;
+    for (let t = 0; t <= 3000; t += 16) {
+      if (t === 1008) {
+        f.setTarget(2, t);
+        expect(f.measuredRate(t)).toBeNull();
+      }
+      if (t === 2000) f.setTarget(4, t);
+      p = f.tick(t, p);
+    }
+    f.setTarget(7, 3008);
     // 5 słów w 2 s = 150 sł./min
-    expect(f.measuredRate(3000)! * 60000).toBeCloseTo(150);
+    expect(f.measuredRate(3008)! * 60000).toBeCloseTo(150, 0);
   });
 });

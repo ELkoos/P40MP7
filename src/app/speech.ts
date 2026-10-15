@@ -81,6 +81,8 @@ export class SpeechListener {
     private lang: string,
     private onWords: (words: string[]) => void,
     private onStatus: (status: ListenerStatus, message?: string) => void,
+    /** Sesja skończyła się i zaraz zostanie wznowiona (to nie jest cisza lektora). */
+    private onRestart: () => void = () => undefined,
   ) {}
 
   get listening(): boolean {
@@ -152,6 +154,7 @@ export class SpeechListener {
       const short = performance.now() - this.sessionStart < MIN_SESSION_MS;
       this.quickEnds = short ? this.quickEnds + 1 : 0;
       const delay = this.quickEnds > MAX_QUICK_RESTARTS ? RESTART_BACKOFF_MS : RESTART_MS;
+      this.onRestart();
       this.restartTimer = window.setTimeout(() => {
         if (this.active && this.rec === rec) this.open(Ctor);
       }, delay);

@@ -55,6 +55,8 @@ export interface Settings {
   voiceLang: string;
   /** Kompensacja opóźnienia rozpoznawania mowy, ms [H]: o tyle tekst wyprzedza ostatni rozpoznany wynik. */
   voiceLatencyMs: number;
+  /** Podgląd diagnostyczny podążania za głosem i zapis logu do pliku. */
+  voiceDebug: boolean;
 }
 
 export const SETTINGS_KEY = "prompter.settings";
@@ -89,6 +91,7 @@ export const DEFAULT_SETTINGS: Settings = {
   followVoice: false,
   voiceLang: "pl-PL",
   voiceLatencyMs: 1000,
+  voiceDebug: false,
 };
 
 /** Języki rozpoznawania mowy do wyboru w ustawieniach. */
@@ -161,6 +164,7 @@ export function normalizeSettings(data: unknown): Settings | null {
     followVoice: bool("followVoice"),
     voiceLang: oneOf<string>("voiceLang", VOICE_LANGS.map(([code]) => code)),
     voiceLatencyMs: num("voiceLatencyMs", 0, 2500),
+    voiceDebug: bool("voiceDebug"),
   };
 }
 
