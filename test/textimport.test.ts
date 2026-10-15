@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assemblePdfText, type PdfItem } from "../src/app/pdfimport";
-import { decodeText, detectFormat, extractFromBytes, rtfToText, titleFromFileName } from "../src/app/textimport";
+import { decodeText, detectFormat, docxXmlToText, extractFromBytes, rtfToText, titleFromFileName } from "../src/app/textimport";
 
 import docxUrl from "./fixtures/probka.docx?inline";
 import odtUrl from "./fixtures/probka.odt?inline";
@@ -50,6 +50,15 @@ describe("import tekstu", () => {
 
   it("rtf", async () => {
     expect(await extractFromBytes("rtf", bytesOf(rtfUrl))).toBe(EXPECTED);
+  });
+
+  it("docx: pole tekstowe nie rozcina akapitu, jego tekst idzie za akapitem", () => {
+    const xml =
+      '<w:body><w:p><w:r><w:t xml:space="preserve">Przed ramką </w:t></w:r><w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent>' +
+      '<w:p><w:r><w:t>Ramka 1</w:t></w:r></w:p><w:p><w:r><w:t>Ramka 2</w:t></w:r></w:p>' +
+      '</w:txbxContent></wps:txbx></w:drawing></mc:Choice><mc:Fallback><w:pict><w:p><w:r><w:t>Ramka 1</w:t></w:r></w:p></w:pict></mc:Fallback></mc:AlternateContent></w:r>' +
+      '<w:r><w:t>i po ramce.</w:t></w:r></w:p><w:p><w:r><w:t>Następny.</w:t></w:r></w:p></w:body>';
+    expect(docxXmlToText(xml)).toBe("Przed ramką i po ramce.\n\nRamka 1\n\nRamka 2\n\nNastępny.");
   });
 
   it("rtf: komórki tabeli nie sklejają się, wiersz tabeli = akapit", () => {

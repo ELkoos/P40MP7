@@ -177,4 +177,16 @@ describe("VoiceFollower", () => {
     expect(back).toBeGreaterThanOrEqual(5);
     expect(back).toBeLessThan(6);
   });
+
+  it("measuredRate: null przed pomiarem (bez tempa startowego), potem tempo z wyników", () => {
+    const f = new VoiceFollower();
+    f.reset(0, 0, 140 / 60000);
+    expect(f.measuredRate(0)).toBeNull();
+    expect(f.rate(0)).toBeCloseTo(140 / 60000);
+    f.setTarget(2, 1000);
+    expect(f.measuredRate(1000)).toBeNull();
+    f.setTarget(7, 3000);
+    // 5 słów w 2 s = 150 sł./min
+    expect(f.measuredRate(3000)! * 60000).toBeCloseTo(150);
+  });
 });

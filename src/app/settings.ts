@@ -1,4 +1,5 @@
-import type { KeyMap } from "./keys";
+import { COMMAND_LABELS, type Command, type KeyMap } from "./keys";
+import { WPM_MAX, WPM_MIN } from "../core/defaults";
 import type { CameraEdge } from "../core/recording";
 
 export type Mode = "A" | "B";
@@ -90,6 +91,15 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceLatencyMs: 1000,
 };
 
+/** Języki rozpoznawania mowy do wyboru w ustawieniach. */
+export const VOICE_LANGS: readonly (readonly [string, string])[] = [
+  ["pl-PL", "polski"],
+  ["en-US", "angielski (USA)"],
+  ["en-GB", "angielski (Wielka Brytania)"],
+  ["de-DE", "niemiecki"],
+  ["uk-UA", "ukraiński"],
+];
+
 export const FONT_STACKS: Record<FontChoice, string> = {
   sans: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
@@ -109,10 +119,60 @@ export function loadSettings(): Settings {
 /** Ustawienia z zapisu (localStorage, plik kopii) uzupełnione domyślnymi; null, gdy to nie są ustawienia v1. */
 export function normalizeSettings(data: unknown): Settings | null {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
-  const parsed = data as Partial<Settings>;
-  if (parsed.version !== 1) return null;
-  const keyMap = typeof parsed.keyMap === "object" && parsed.keyMap !== null ? parsed.keyMap : {};
-  return { ...DEFAULT_SETTINGS, ...parsed, keyMap };
+  const v = data as Record<string, unknown>;
+  if (v.version !== 1) return null;
+  const d = DEFAULT_SETTINGS;
+  // Każde pole sprawdzane osobno: zły typ lub wartość spoza listy → domyślna, liczba spoza zakresu → przycięta
+  // do zakresu z panelu ustawień. Plik może być edytowany ręcznie albo pochodzić z innej wersji.
+  const num = (k: keyof Settings, min: number, max: number): number => {
+    const x = v[k];
+    return typeof x === "number" && Number.isFinite(x) ? Math.min(max, Math.max(min, x)) : (d[k] as number);
+  };
+  const bool = (k: keyof Settings): boolean => (typeof v[k] === "boolean" ? (v[k] as boolean) : (d[k] as boolean));
+  const str = (k: keyof Settings): string => (typeof v[k] === "string" ? (v[k] as string) : (d[k] as string));
+  const oneOf = <T>(k: keyof Settings, allowed: readonly T[]): T => (allowed.includes(v[k] as T) ? (v[k] as T) : (d[k] as T));
+  return {
+    version: 1,
+    mode: oneOf<Mode>("mode", ["A", "B"]),
+    wpmA: num("wpmA", WPM_MIN, WPM_MAX),
+    wpmB: num("wpmB", WPM_MIN, WPM_MAX),
+    focusPct: num("focusPct", 10, 90),
+    fontSizePx: v.fontSizePx === null ? null : typeof v.fontSizePx === "number" && Number.isFinite(v.fontSizePx) ? Math.min(160, Math.max(16, v.fontSizePx)) : d.fontSizePx,
+    lineHeight: num("lineHeight", 1.1, 2),
+    columnCh: num("columnCh", 20, 100),
+    font: oneOf<FontChoice>("font", ["sans", "serif", "mono"]),
+    theme: oneOf<Theme>("theme", ["dark", "light"]),
+    countdownS: num("countdownS", 0, 10),
+    rampMs: num("rampMs", 0, 5000),
+    showNext: bool("showNext"),
+    keyMap: normalizeKeyMap(v.keyMap),
+    anchorPct: num("anchorPct", 0, 100),
+    record: bool("record"),
+    cameraEdge: oneOf<CameraEdge>("cameraEdge", ["top", "left", "right"]),
+    recFocusPct: num("recFocusPct", 3, 40),
+    recSideAnchorPct: num("recSideAnchorPct", 10, 50),
+    recColumnCh: num("recColumnCh", 12, 60),
+    recHeight: oneOf<720 | 1080>("recHeight", [720, 1080]),
+    cameraId: str("cameraId"),
+    micId: str("micId"),
+    recAutoStart: bool("recAutoStart"),
+    recPreviewWhilePlaying: bool("recPreviewWhilePlaying"),
+    mirrorPreview: bool("mirrorPreview"),
+    followVoice: bool("followVoice"),
+    voiceLang: oneOf<string>("voiceLang", VOICE_LANGS.map(([code]) => code)),
+    voiceLatencyMs: num("voiceLatencyMs", 0, 2500),
+  };
+}
+
+/** Tylko przypisania klawisz → znana komenda. */
+function normalizeKeyMap(x: unknown): KeyMap {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return {};
+  const out: KeyMap = {};
+  for (const [key, cmd] of Object.entries(x)) {
+    if (key === "__proto__") continue;
+    if (typeof cmd === "string" && Object.prototype.hasOwnProperty.call(COMMAND_LABELS, cmd)) out[key] = cmd as Command;
+  }
+  return out;
 }
 
 export function saveSettings(s: Settings): void {

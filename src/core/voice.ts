@@ -280,6 +280,11 @@ export class VoiceFollower {
 
   /** Tempo mowy, sloty na ms: przyrost wyników w oknie; przed pomiarem tempo startowe. */
   rate(now: number): number {
+    return this.measuredRate(now) ?? this.priorRate;
+  }
+
+  /** Zmierzone tempo mowy, sloty na ms; null, dopóki wyniki nie obejmują co najmniej 0,8 s. */
+  measuredRate(now: number): number | null {
     const from = now - this.opt.rateWindowMs;
     while (this.history.length > 2 && this.history[0]![0] < from) this.history.shift();
     const h = this.history;
@@ -287,7 +292,7 @@ export class VoiceFollower {
       const dt = h[h.length - 1]![0] - h[0]![0];
       if (dt >= 800) return Math.min(MAX_RATE, (h[h.length - 1]![1] - h[0]![1]) / dt);
     }
-    return this.priorRate;
+    return null;
   }
 
   /** Gdzie powinien być tekst: ostatni wynik + to, co lektor powiedział od tamtej chwili (do ciszy). */

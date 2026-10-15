@@ -18,6 +18,7 @@ import { RsvpRenderer, ScrollRenderer, type Renderer } from "./renderers";
 import { keyId, resolveCommand, type Command } from "./keys";
 import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
 import { SpeechListener, speechSupport, type ListenerStatus } from "./speech";
+import { WakeLockHolder } from "./wakelock";
 
 export type { Command } from "./keys";
 
@@ -40,10 +41,6 @@ function formatTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-interface WakeLockLike {
-  release(): Promise<void>;
-}
-
 /** Ekran odtwarzania: maszyna stanów, pętla rAF, wejście, Wake Lock (sekcje 5 i 6.4). */
 export class Player {
   private el: HTMLDivElement;
@@ -59,7 +56,7 @@ export class Player {
   private hudUntil = 0;
   private countdownTimer = 0;
   private counting = false;
-  private wakeLock: WakeLockLike | null = null;
+  private wakeLock = new WakeLockHolder();
   private resizeObserver: ResizeObserver;
   private lastInfo = "";
   private pointerStart: { x: number; y: number; t: number } | null = null;
@@ -215,7 +212,8 @@ export class Player {
     if (i >= 0) this.renderer?.draw(i, p);
     const listening = this.voice?.listener.listening ?? false;
     this.renderer?.setPaused(this.clock.state !== "playing" && !this.counting && !listening);
-    if (this.clock.state === "finished" && this.wakeLock) this.releaseWakeLock();
+    // Ekran może gasnąć, gdy nic się nie dzieje: pauza, koniec tekstu, mikrofon wyłączony przez błąd.
+    if (this.clock.state !== "playing" && !this.counting && !listening) this.wakeLock.release();
     if (this.rec) {
       // Przy podążaniu za głosem zegar stoi, więc koniec tekstu i „odtwarzanie” wynikają z pozycji i mikrofonu.
       const finished = this.clock.state === "finished" || (listening && p >= this.schedule[this.tokens.length]!);
@@ -253,13 +251,20 @@ export class Player {
       `${effectiveFontSize(view)} px · punkt ${view.focusPct}%` +
       (view.mode === "A" ? ` · kolumna ${view.columnCh} zn.` : "");
     const speed = this.voice ? "za głosem" : `${this.clock.wpm} sł./min`;
-    const info = `Tryb ${this.settings.mode} · ${speed} · ${pct}% · zostało ${formatTime(
-      remainingMs(this.schedule, this.clock.p, this.clock.wpm),
-    )} · ${state} · ${look}`;
+    const info = `Tryb ${this.settings.mode} · ${speed} · ${pct}% · zostało ${this.remainingText(now)} · ${state} · ${look}`;
     if (info !== this.lastInfo) {
       this.hudInfo.textContent = info;
       this.lastInfo = info;
     }
+  }
+
+  /** Czas do końca: z ustawionej prędkości, a przy podążaniu za głosem z tempa lektora („—” przed pomiarem). */
+  private remainingText(now: number): string {
+    if (!this.voice) return formatTime(remainingMs(this.schedule, this.clock.p, this.clock.wpm));
+    const rate = this.voice.follower.measuredRate(now);
+    if (!rate) return "—";
+    // rate w slotach na ms, remainingMs przyjmuje sloty na minutę.
+    return formatTime(remainingMs(this.schedule, this.clock.p, rate * 60000));
   }
 
   private showHud(): void {
@@ -361,7 +366,7 @@ export class Player {
     this.rec?.countdownStarted();
     this.resyncVoice(performance.now());
     this.voice.listener.start();
-    this.requestWakeLock();
+    void this.wakeLock.acquire();
   }
 
   private resyncVoice(now: number): void {
@@ -393,7 +398,7 @@ export class Player {
     this.counting = true;
     this.overlay.hidden = false;
     this.overlay.textContent = String(left);
-    this.requestWakeLock();
+    void this.wakeLock.acquire();
     this.countdownTimer = window.setInterval(() => {
       left--;
       if (left <= 0) {
@@ -413,30 +418,14 @@ export class Player {
 
   private play(): void {
     this.clock.play(performance.now());
-    this.requestWakeLock();
+    void this.wakeLock.acquire();
   }
 
   private pause(): void {
     if (this.voice?.listener.listening) this.voice.listener.stop();
     if (this.counting) this.cancelCountdown();
     this.clock.pause();
-    this.releaseWakeLock();
-  }
-
-  private async requestWakeLock(): Promise<void> {
-    if (this.wakeLock) return;
-    const nav = navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<WakeLockLike> } };
-    try {
-      this.wakeLock = (await nav.wakeLock?.request("screen")) ?? null;
-    } catch {
-      this.wakeLock = null;
-    }
-  }
-
-  private releaseWakeLock(): void {
-    const lock = this.wakeLock;
-    this.wakeLock = null;
-    lock?.release().catch(() => undefined);
+    this.wakeLock.release();
   }
 
   private toggleFullscreen(): void {
@@ -494,7 +483,7 @@ export class Player {
     window.removeEventListener("keydown", this.onKey);
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.resizeObserver.disconnect();
-    this.releaseWakeLock();
+    this.wakeLock.release();
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => undefined);
     this.renderer?.destroy();
     // Trwające nagranie zostaje zapisane do pliku także po wyjściu z odtwarzacza.

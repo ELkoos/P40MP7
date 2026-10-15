@@ -137,12 +137,18 @@ function attr(attrs: string, name: string): string | null {
   return m ? m[1]! : null;
 }
 
-/** Tekst główny z word/document.xml. Pomija tekst usunięty (śledzenie zmian), kody pól i duplikaty VML. */
+/**
+ * Tekst główny z word/document.xml. Pomija tekst usunięty (śledzenie zmian), kody pól i duplikaty VML.
+ * Pole tekstowe (ramka) jest zakotwiczone w akapicie; jego akapity trafiają za ten akapit, żeby go nie rozcinać.
+ */
 export function docxXmlToText(xml: string): string {
   const paragraphs: string[] = [];
   let cur = "";
   let inText = 0;
   let skip = 0; // mc:Fallback (kopia pola tekstowego w starym formacie)
+  // Pola tekstowe: zachowany tekst akapitu, w którym stoi ramka, i akapity ramek czekające na koniec tego akapitu.
+  const outer: string[] = [];
+  let boxParagraphs: string[] = [];
   for (const m of xml.matchAll(XML_TOKEN)) {
     const [, close, tag, attrs, selfClose, , text] = m;
     if (text !== undefined) {
@@ -156,6 +162,16 @@ export function docxXmlToText(xml: string): string {
       continue;
     }
     if (skip) continue;
+    if (tag === "w:txbxContent") {
+      if (close) {
+        if (cur) boxParagraphs.push(cur);
+        cur = outer.pop() ?? "";
+      } else if (!selfClose) {
+        outer.push(cur);
+        cur = "";
+      }
+      continue;
+    }
     if (tag === "w:t") {
       if (close) inText = 0;
       else if (!selfClose) inText = 1;
@@ -166,11 +182,15 @@ export function docxXmlToText(xml: string): string {
     } else if (!close && tag === "w:noBreakHyphen") {
       cur += "-";
     } else if (tag === "w:p" && (close || selfClose)) {
-      paragraphs.push(cur);
+      if (outer.length > 0) boxParagraphs.push(cur);
+      else {
+        paragraphs.push(cur, ...boxParagraphs);
+        boxParagraphs = [];
+      }
       cur = "";
     }
   }
-  paragraphs.push(cur);
+  paragraphs.push(cur, ...boxParagraphs);
   return joinParagraphs(paragraphs);
 }
 

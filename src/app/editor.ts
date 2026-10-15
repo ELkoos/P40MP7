@@ -5,7 +5,7 @@ import { digitStepper, field, rangeControl, segmented } from "./controls";
 import { durationFromParts } from "./duration";
 import { Player } from "./player";
 import { RecordingSettingsPanel } from "./recorder";
-import { effectiveFontSize, saveSettings, wpmFor, type Settings } from "./settings";
+import { effectiveFontSize, saveSettings, VOICE_LANGS, wpmFor, type Settings } from "./settings";
 import { speechSupport } from "./speech";
 import { newId, titleFrom, type Script, type ScriptStore } from "./storage";
 import { extractText, IMPORT_ACCEPT, ImportError, titleFromFileName } from "./textimport";
@@ -28,13 +28,6 @@ Wpisz lub wklej tutaj swój tekst. Pusta linia rozpoczyna nowy akapit.
 
 Naciśnij Start albo spację. Strzałki w górę i w dół zmieniają prędkość, strzałki w lewo i w prawo przeskakują o zdanie. Escape wraca do edytora.`;
 
-const VOICE_LANGS: [string, string][] = [
-  ["pl-PL", "polski"],
-  ["en-US", "angielski (USA)"],
-  ["en-GB", "angielski (Wielka Brytania)"],
-  ["de-DE", "niemiecki"],
-  ["uk-UA", "ukraiński"],
-];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -104,9 +97,12 @@ export class EditorView {
     });
 
     this.titleInput.addEventListener("input", () => this.scheduleSave());
+    // Szacunek czasu tokenizuje cały tekst (ok. 50 ms przy 20 tys. słów w Node), więc nie przy każdym klawiszu.
+    let estimateTimer = 0;
     this.bodyInput.addEventListener("input", () => {
       this.scheduleSave();
-      this.updateEstimate();
+      window.clearTimeout(estimateTimer);
+      estimateTimer = window.setTimeout(() => this.updateEstimate(), 300);
     });
 
     // E1: kopia całej biblioteki i pojedynczy tekst do pliku.
