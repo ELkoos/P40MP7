@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeBackup, mergeScripts, parseBackup, parseBackupFile, safeFileName } from "../src/app/backup";
+import { importedVersionOf, makeBackup, mergeScripts, parseBackup, parseBackupFile, safeFileName } from "../src/app/backup";
 import { DEFAULT_SETTINGS } from "../src/app/settings";
 import { assignKey, defaultKeysFor, keyId, keyLabel, resolveCommand, unassignKey } from "../src/app/keys";
 import type { Script } from "../src/app/storage";
@@ -91,5 +91,12 @@ describe("kopia biblioteki", () => {
   it("safeFileName usuwa znaki niedozwolone, zostawia polskie litery", () => {
     expect(safeFileName('Wywiad: "część" 1/2')).toBe("Wywiad część 1 2");
     expect(safeFileName("  ")).toBe("tekst");
+  });
+
+  it("importedVersionOf: otwarty tekst zastąpiony importem jest zwracany do ponownego wczytania", () => {
+    const r = mergeScripts([s("a", 10), s("b", 10)], [s("a", 20), s("c", 1)]);
+    expect(importedVersionOf("a", r.toWrite)?.updatedAt).toBe(20);
+    expect(importedVersionOf("b", r.toWrite)).toBeNull();
+    expect(importedVersionOf(undefined, r.toWrite)).toBeNull();
   });
 });

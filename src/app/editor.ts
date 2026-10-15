@@ -1,5 +1,5 @@
 import { buildSchedule, DEFAULT_RAMP, remainingMs, tokenize, wpmForDuration, WPM_MAX, WPM_MIN } from "../core";
-import { makeBackup, mergeScripts, parseBackupFile, safeFileName } from "./backup";
+import { importedVersionOf, makeBackup, mergeScripts, parseBackupFile, safeFileName } from "./backup";
 import { COMMAND_LABELS, assignKey, defaultKeysFor, keyId, keyLabel, unassignKey, type Command } from "./keys";
 import { digitStepper, field, rangeControl, segmented } from "./controls";
 import { durationFromParts } from "./duration";
@@ -63,6 +63,8 @@ export class EditorView {
   /** Komenda czekająca na naciśnięcie klawisza w trybie uczenia (E4). */
   private learning: Command | null = null;
   private recordingPanel: RecordingSettingsPanel;
+  /** Odtwarzacz otwarty albo w trakcie otwierania (od kliknięcia Start do wyjścia). */
+  private playerOpen = false;
 
   constructor(
     private host: HTMLElement,
@@ -440,6 +442,9 @@ export class EditorView {
       await this.saveNow();
       const result = mergeScripts(await this.store.list(), incoming);
       for (const s of result.toWrite) await this.store.put(s);
+      // Otwarty tekst zastąpiony nowszą wersją z kopii: pokazujemy ją, żeby zapis z formularza jej nie nadpisał.
+      const replaced = importedVersionOf(this.script?.id, result.toWrite);
+      if (replaced) this.open(replaced);
       // Ustawienia z pliku zastępują bieżące; ten sam obiekt, bo trzymają go panele i odtwarzacz.
       if (settings) {
         Object.assign(this.settings, settings);
@@ -568,17 +573,25 @@ export class EditorView {
   }
 
   private async start(): Promise<void> {
-    if (this.bodyInput.value.trim() === "") return;
+    // Drugie kliknięcie (podwójne stuknięcie) w trakcie zapisu otwierało drugi odtwarzacz.
+    if (this.playerOpen || this.bodyInput.value.trim() === "") return;
+    this.playerOpen = true;
     // Pełny ekran musi być wywołany synchronicznie w obsłudze gestu użytkownika (F-17).
     this.host.requestFullscreen?.().catch(() => undefined);
     this.recordingPanel.stopPreview();
-    await this.saveNow();
+    try {
+      await this.saveNow();
+    } catch (e) {
+      this.playerOpen = false;
+      throw e;
+    }
     const s = this.script!;
     this.root.hidden = true;
     new Player(this.host, s.body, s.lastWord, this.settings, async (lastWord) => {
       s.lastWord = lastWord;
       await this.store.put(s);
       this.root.hidden = false;
+      this.playerOpen = false;
       // Tryb, prędkość, punkt odczytu i kolumna mogły zmienić się w odtwarzaczu (E3).
       this.refreshSettingsUi();
     }, s.title);

@@ -1,26 +1,27 @@
-// Service Worker: praca offline po pierwszym załadowaniu (N-01).
+/**
+ * Szablon Service Workera (zwykły JavaScript w łańcuchu, bo sw.js nie przechodzi przez bundler).
+ * Przy budowaniu buildServiceWorker podmienia VERSION i ASSETS.
+ */
+export const SW_TEMPLATE = `// Service Worker: praca offline po pierwszym załadowaniu (N-01).
 // Nawigacja: najpierw sieć (żeby dostać nową wersję), przy braku sieci kopia z cache.
 // Pozostałe pliki z tego samego źródła: najpierw cache, w tle zapis z sieci.
-const CACHE = "prompter-v3";
+//
+// Szablon: przy budowaniu (vite.config.ts, sw/build.ts) VERSION i ASSETS są podmieniane na skrót
+// i listę plików z assets/. Dzięki temu każda nowa wersja aplikacji daje inny sw.js: przeglądarka
+// instaluje go od nowa, zapisuje wszystkie pliki nowej wersji (także pdf.js do importu PDF)
+// i usuwa cache poprzedniej.
+const VERSION = "dev";
+const ASSETS = /*ASSETS*/ [];
+const CACHE = "prompter-" + VERSION;
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
-// Pliki zbudowane przez Vite mają w nazwie skrót treści, więc ich listę bierzemy z index.html.
-async function precache() {
-  const cache = await caches.open(CACHE);
-  const html = await (await fetch("./index.html", { cache: "no-store" })).text();
-  const assets = [...html.matchAll(/(?:src|href)="(\.\/assets\/[^"]+)"/g)].map((m) => m[1]);
-  // Pliki ładowane dynamicznie (np. pdf.js do importu PDF): lista z precache.json, tworzona przy budowaniu.
-  let lazy = [];
-  try {
-    lazy = await (await fetch("./precache.json", { cache: "no-store" })).json();
-  } catch {
-    lazy = [];
-  }
-  await cache.addAll([...new Set([...CORE, ...assets, ...lazy])]);
-}
-
 self.addEventListener("install", (event) => {
-  event.waitUntil(precache().then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll([...new Set([...CORE, ...ASSETS])]))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -40,8 +41,11 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put("./index.html", copy));
+          // Tylko poprawna strona zastępuje kopię: 404 lub błąd serwera nie może trafić do cache jako aplikacja.
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put("./index.html", copy));
+          }
           return res;
         })
         .catch(() => caches.match("./index.html")),
@@ -63,3 +67,4 @@ self.addEventListener("fetch", (event) => {
     ),
   );
 });
+`;

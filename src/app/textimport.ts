@@ -288,6 +288,9 @@ export function rtfToText(bytes: Uint8Array): string {
         if (SKIP_DEST.has(word)) st.skip = true;
         else if (word === "par" || word === "sect") emit("\n\n");
         else if (word === "line") emit("\n");
+        // Tabela: komórki rozdzielone spacją, każdy wiersz tabeli jako osobny akapit.
+        else if (word === "cell" || word === "nestcell") emit(" ");
+        else if (word === "row" || word === "nestrow") emit("\n\n");
         else if (word === "tab") emit(" ");
         else if (word === "emdash") emit("—");
         else if (word === "endash") emit("–");
