@@ -86,6 +86,16 @@ export function mergeScripts(existing: readonly Script[], incoming: readonly Scr
   return result;
 }
 
+/**
+ * Wersja otwartego w edytorze tekstu, którą import zapisał do bazy; null, gdy import go nie zmienił.
+ * Edytor musi ją wczytać, bo inaczej najbliższy zapis nadpisze import starą treścią z formularza.
+ */
+export function importedVersionOf(openId: string | undefined, toWrite: readonly Script[]): Script | null {
+  if (openId === undefined) return null;
+  const s = toWrite.find((x) => x.id === openId);
+  return s ? { ...s } : null;
+}
+
 /** Nazwa pliku bezpieczna w systemach plików, z polskimi literami. */
 export function safeFileName(name: string): string {
   const cleaned = name

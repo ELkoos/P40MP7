@@ -18,6 +18,7 @@
   "include": [
     "src",
     "test",
-    "vite.config.ts"
+    "vite.config.ts",
+    "sw"
   ]
 }

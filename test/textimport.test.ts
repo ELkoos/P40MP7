@@ -52,6 +52,11 @@ describe("import tekstu", () => {
     expect(await extractFromBytes("rtf", bytesOf(rtfUrl))).toBe(EXPECTED);
   });
 
+  it("rtf: komórki tabeli nie sklejają się, wiersz tabeli = akapit", () => {
+    const src = "{\\rtf1\\ansi\\trowd\\cellx1000\\cellx2000\\pard\\intbl Ala\\cell Ola\\cell\\row\\trowd\\pard\\intbl kot\\cell pies\\cell\\row\\pard Dalej\\par}";
+    expect(rtfToText(new TextEncoder().encode(src))).toBe("Ala Ola\n\nkot pies\n\nDalej");
+  });
+
   it("rtf: \\uN i \\'hh w stronie kodowej 1250", () => {
     expect(rtfToText(new TextEncoder().encode("{\\rtf1\\ansi\\ansicpg1250{\\fonttbl{\\f0 Arial;}}\\f0 \\'b3\\'b9ka \\u380?\\par drugi}"))).toBe("łąka ż\n\ndrugi");
   });
