@@ -323,17 +323,19 @@ export class VoiceFollower {
 
   /**
    * Detektor głosu z mikrofonu (poziom dźwięku, bez opóźnienia usługi). Gdy jest, to on decyduje o ciszy:
-   * tekst staje, kiedy lektor milknie, i rusza, kiedy zaczyna mówić, zamiast czekać na wyniki rozpoznawania.
+   * tekst staje, kiedy lektor milknie, i rusza, kiedy zaczyna mówić (po pierwszym wyniku rozpoznawania).
    */
   voiceActivity(now: number, active: boolean): void {
     if (this.vadLast === null || active) this.vadLast = now;
     this.vadActive = active;
-    // Lektor zaczął czytać: ruszamy z tempem startowym, nie czekając na pierwszy wynik rozpoznawania.
-    if (active && !this.started && this.priorRate > 0) {
-      this.started = true;
-      this.lastAdvance = now;
-      this.talkMs = 0;
-    }
+    // Bez pierwszego wyniku rozpoznawania tekst stoi: sam poziom dźwięku nie mówi, gdzie lektor jest.
+  }
+
+  /** Detektor wyłączony (np. odbierał mikrofon rozpoznawaniu): cisza znów wynika z wyników rozpoznawania. */
+  clearVoiceActivity(now: number): void {
+    this.vadLast = null;
+    this.vadActive = false;
+    this.lastSpeech = Math.max(this.lastSpeech, now);
   }
 
   /** Rozpoznawanie usłyszało mowę (dowolny wynik ze słowami), niezależnie od dopasowania. */

@@ -9,7 +9,8 @@ export type VoiceLogEvent =
   | [t: number, kind: "pos", p: number, goal: number, target: number, mode: string, rateWpm: number]
   | [t: number, kind: "status", status: string, message: string]
   | [t: number, kind: "restart"]
-  | [t: number, kind: "nav", word: number];
+  | [t: number, kind: "nav", word: number]
+  | [t: number, kind: "note", text: string];
 
 const MAX_EVENTS = 50000;
 

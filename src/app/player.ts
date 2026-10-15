@@ -36,6 +36,9 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
+/** Tyle ms mowy wg detektora bez żadnego wyniku rozpoznawania wyłącza detektor. */
+const VAD_NO_RESULT_MS = 4000;
+
 function round4(x: number): number {
   return Math.round(x * 10000) / 10000;
 }
@@ -83,6 +86,12 @@ export class Player {
   private lastDebugAt = 0;
   private lastPosLogAt = 0;
   private lastVadLogged: boolean | null = null;
+  /** Wyniki rozpoznawania ze słowami w tym otwarciu odtwarzacza i czas mowy wg detektora bez żadnego wyniku. */
+  private resultCount = 0;
+  private vadTalkNoResultMs = 0;
+  private lastFrameAt: number | null = null;
+  /** Detektor wyłączony na stałe w tym otwarciu (Android albo odbierał mikrofon rozpoznawaniu). */
+  private vadDisabled = false;
 
   constructor(
     private host: HTMLElement,
@@ -231,10 +240,17 @@ export class Player {
   private frame(now: number): void {
     // Przy podążaniu za głosem zegar stoi, a p ustawia VoiceFollower.
     if (this.voice?.listener.listening) {
+      const dt = this.lastFrameAt === null ? 0 : Math.min(now - this.lastFrameAt, 100);
+      this.lastFrameAt = now;
       if (this.vad) {
         const active = this.vad.sample(now);
-        this.voice.follower.voiceActivity(now, active);
-        if (active !== this.lastVadLogged) {
+        // Detektor słyszy mowę, a rozpoznawanie nie zwraca nic: drugi dostęp do mikrofonu zabiera dźwięk
+        // rozpoznawaniu (tak było na Androidzie). Wyłączamy detektor i zostajemy przy samym rozpoznawaniu.
+        if (active && this.resultCount === 0) this.vadTalkNoResultMs += dt;
+        if (this.vadTalkNoResultMs > VAD_NO_RESULT_MS) {
+          this.disableVad(now, "detektor słyszy mowę, a rozpoznawanie nie zwraca słów");
+        } else this.voice.follower.voiceActivity(now, active);
+        if (this.vad && active !== this.lastVadLogged) {
           this.voiceLog?.add([now, "vad", active, round4(this.vad.level), round4(this.vad.noiseFloor)]);
           this.lastVadLogged = active;
         }
@@ -407,7 +423,13 @@ export class Player {
 
   /** Detektor głosu: osobny dostęp do mikrofonu przez Web Audio; bez niego cisza wynika z wyników rozpoznawania. */
   private startVad(): void {
-    if (this.vad || this.vadStarting) return;
+    if (this.vad || this.vadStarting || this.vadDisabled) return;
+    // Android: drugi dostęp do mikrofonu odbiera dźwięk rozpoznawaniu mowy (log z Androida 10, Chrome 155:
+    // 0 wyników przez 29 s, sesje kończone co ok. 5,4 s). Tam cisza wynika z samych wyników rozpoznawania.
+    if (/Android/i.test(navigator.userAgent)) {
+      this.disableVad(performance.now(), "Android: bez detektora, mikrofon tylko dla rozpoznawania");
+      return;
+    }
     this.vadStarting = true;
     void VoiceActivityDetector.start(this.settings.micId).then((vad) => {
       this.vadStarting = false;
@@ -422,6 +444,13 @@ export class Player {
     this.vad?.stop();
     this.vad = null;
     this.lastVadLogged = null;
+  }
+
+  private disableVad(now: number, reason: string): void {
+    this.vadDisabled = true;
+    this.stopVad();
+    this.voice?.follower.clearVoiceActivity(now);
+    this.voiceLog?.add([now, "note", `detektor wyłączony: ${reason}`]);
   }
 
   private buildVoiceDebug(words: string[]): void {
@@ -453,9 +482,11 @@ export class Player {
     }
     if (!this.debugEl || now - this.lastDebugAt < 200) return;
     this.lastDebugAt = now;
-    const vad = this.vad ? `${this.vad.active ? "mówi" : "cisza"} (poziom ${this.vad.level.toFixed(3)}, tło ${this.vad.noiseFloor.toFixed(3)})` : "brak (cisza z wyników)";
+    const vad = this.vad
+      ? `${this.vad.active ? "mówi" : "cisza"} (poziom ${this.vad.level.toFixed(3)}, tło ${this.vad.noiseFloor.toFixed(3)})`
+      : `${this.vadDisabled ? "wyłączony" : "brak"} (cisza z wyników)`;
     this.debugEl.textContent = [
-      `słyszę: ${this.lastHeard.slice(-6).join(" ") || "—"}`,
+      `słyszę (wyników ${this.resultCount}): ${this.lastHeard.slice(-6).join(" ") || "—"}`,
       `dopasowanie: ${this.lastMatchText}`,
       `tryb: ${st.mode} · tempo ${wpm} sł./min${st.measured ? "" : " (z ustawień)"}`,
       `od dopasowania ${(st.msSinceMatch / 1000).toFixed(1)} s · od mowy ${(st.msSinceSpeech / 1000).toFixed(1)} s`,
@@ -479,6 +510,7 @@ export class Player {
     const now = performance.now();
     // Każdy wynik ze słowami to znak, że lektor mówi, nawet jeśli słowa się nie dopasują.
     v.follower.heard(now);
+    this.resultCount++;
     this.lastHeard = heard;
     this.voiceLog?.add([now, "result", heard]);
     const match = v.matcher.update(heard);
