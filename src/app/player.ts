@@ -36,6 +36,9 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
+/** Najwyżej tyle słów przed ostatnim rozpoznanym słowem na Androidzie (odtworzenie 3 logów: średnio 0–0,4, maks. 1,5–1,9). */
+const ANDROID_MAX_LEAD = 1.5;
+
 const IS_ANDROID = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 
 /** Tyle ms mowy wg detektora bez żadnego wyniku rozpoznawania wyłącza detektor. */
@@ -127,7 +130,9 @@ export class Player {
       const words = tokenize(body, { splitLongWords: false }).map((t) => t.text);
       this.voice = {
         matcher: new VoiceMatcher(words),
-        follower: new VoiceFollower({ latencyMs: settings.voiceLatencyMs }),
+        // Android: słowa przychodzą prawie na bieżąco, więc tekst nie może uciekać przed ostatnim rozpoznanym słowem
+        // (logi z Androida 10: przy 500 i 1000 ms tekst był 3–9 słów przed nim).
+        follower: new VoiceFollower({ latencyMs: settings.voiceLatencyMs, maxLeadSlots: IS_ANDROID ? ANDROID_MAX_LEAD : Infinity }),
         listener: new SpeechListener(
           settings.voiceLang,
           (heard) => this.onHeard(heard),

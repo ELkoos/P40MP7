@@ -187,6 +187,11 @@ export interface VoiceFollowOptions {
   latencyMs: number;
   /** Po ciszy tekst wraca tylko, gdy wyprzedził miejsce, gdzie lektor zamilkł, o więcej słów niż tyle. */
   rewindMinSlots: number;
+  /**
+   * Najwyżej o tyle słów tekst może wyprzedzić ostatnie rozpoznane słowo (lub miejsce, gdzie lektor zamilkł).
+   * Chrome na Androidzie zwraca słowa prawie na bieżąco, więc większe wyprzedzenie to tekst przed lektorem.
+   */
+  maxLeadSlots: number;
   /** Okno pomiaru tempa mowy, ms: tempo = przyrost wyników w tym oknie / czas. */
   rateWindowMs: number;
   /** Czas, w którym korekta zbiera różnicę między pozycją a celem, ms (większy = łagodniej). */
@@ -226,6 +231,7 @@ export const DEFAULT_VOICE_FOLLOW: VoiceFollowOptions = {
   latencyMs: 1000,
   rateWindowMs: 6000,
   rewindMinSlots: 2,
+  maxLeadSlots: Infinity,
   correctionMs: 1500,
   velocityTauMs: 400,
   deadReckonMs: 5000,
@@ -479,6 +485,11 @@ export class VoiceFollower {
     return this.base(rate) + rate * Math.min(this.talkMs, this.opt.deadReckonMs);
   }
 
+  /** Granica wyprzedzenia: ostatnie rozpoznane słowo (albo miejsce, gdzie lektor zamilkł) plus `maxLeadSlots`. */
+  private leadCap(): number {
+    return Math.max(this.target, this.stop ?? -Infinity) + this.opt.maxLeadSlots;
+  }
+
   /** Stan do podglądu diagnostycznego. */
   state(now: number): VoiceFollowState {
     const measured = this.measuredRate(now);
@@ -544,13 +555,16 @@ export class VoiceFollower {
       const floor = diff > -o.aheadStopSlots ? rate * o.minSpeedFraction : 0;
       want = Math.min(Math.max(want, floor), maxSpeed);
     }
+    // Łagodne hamowanie przed granicą wyprzedzenia (bez szarpnięcia przy dojściu do niej).
+    const cap = this.leadCap();
+    if (want > 0) want = Math.min(want, Math.max(0, cap - p) / o.correctionMs * 4);
     this.velocity += (want - this.velocity) * (1 - Math.exp(-dt / o.velocityTauMs));
     // Zatrzymanie do zera zamiast nieskończenie wolnego pełzania.
     if (want === 0 && Math.abs(this.velocity) < 1e-5) this.velocity = 0;
     const next = p + this.velocity * dt;
     if (this.velocity >= 0) {
       // W ciszy nie mijamy celu; w trakcie mowy najwyżej `aheadStopSlots` przed nim.
-      const limit = silent ? g : g + o.aheadStopSlots;
+      const limit = Math.min(silent ? g : g + o.aheadStopSlots, cap);
       return Math.min(next, Math.max(p, limit));
     }
     return Math.max(next, Math.min(p, g));
