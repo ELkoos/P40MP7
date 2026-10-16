@@ -249,3 +249,31 @@ describe("VoiceFollower: koniec wypowiedzi na Androidzie", () => {
     expect(run(false).maxP).toBeGreaterThan(run(true).maxP);
   });
 });
+
+describe("VoiceFollower: granica wyprzedzenia", () => {
+  it("tekst nie wyprzedza ostatniego rozpoznanego słowa o więcej niż maxLeadSlots", () => {
+    // Słowa co 300–500 ms (jak na Androidzie), z serią szybkich wyników zawyżających tempo.
+    const run = (maxLeadSlots: number) => {
+      const f = new VoiceFollower({ latencyMs: 1000, maxLeadSlots });
+      f.reset(0, 0, 130 / 60000);
+      let p = 0;
+      let slot = 0;
+      let next = 500;
+      let maxAhead = 0;
+      for (let t = 0; t <= 20000; t += 16) {
+        if (t >= next) {
+          slot += 1;
+          f.setTarget(slot, t);
+          next = t + (slot % 10 < 3 ? 120 : 420);
+        }
+        p = f.tick(t, p);
+        if (slot > 0) maxAhead = Math.max(maxAhead, p - slot);
+      }
+      return { maxAhead, end: p, slot };
+    };
+    const capped = run(1.5);
+    expect(capped.maxAhead).toBeLessThanOrEqual(1.5 + 1e-9);
+    expect(capped.end).toBeGreaterThan(capped.slot - 1);
+    expect(run(Infinity).maxAhead).toBeGreaterThan(2);
+  });
+});
