@@ -1,5 +1,5 @@
 import { clampedCenterPx } from "../core/recording";
-import { columnOffset, scrollY, sentenceRange, splitAtOrp, rsvpLeftEdge, type MeasuredLine, type Token } from "../core";
+import { columnOffset, easeToward, lineStepY, scrollY, sentenceRange, splitAtOrp, rsvpLeftEdge, type MeasuredLine, type Token } from "../core";
 import { FONT_STACKS, effectiveFontSize, type Settings } from "./settings";
 
 /** Wspólny interfejs obu trybów: renderer tylko odczytuje pozycję zegara (sekcja 5). */
@@ -22,6 +22,11 @@ function applyTypography(el: HTMLElement, s: Settings): void {
   el.style.lineHeight = String(s.lineHeight);
 }
 
+/** Ile wierszy od linii odczytu w dół jest nieprzyciemnionych przy podążaniu za głosem [H]. */
+const VOICE_CLEAR_LINES = 2;
+/** Stała czasowa przesuwu o wiersz przy głosie [H]: 50 ms, czyli ~150 ms do końca ruchu. */
+const VOICE_STEP_TAU_MS = 50;
+
 /** Tryb A: przewijanie z linią odczytu (6.5). */
 export class ScrollRenderer implements Renderer {
   private root: HTMLDivElement;
@@ -33,12 +38,17 @@ export class ScrollRenderer implements Renderer {
   private lineHeightPx = 0;
   private focus = 0;
   private current = -1;
+  /** Wyświetlana pozycja y przy podążaniu za głosem (dochodzi do wiersza z p) i czas ostatniej klatki. */
+  private shownY: number | null = null;
+  private lastDrawAt: number | null = null;
 
   constructor(
     private stage: HTMLElement,
     tokens: readonly Token[],
     private schedule: Float64Array,
     private settings: Settings,
+    /** Podążanie za głosem: przesuw o cały wiersz i odsłonięty następny wiersz (VOICE_CLEAR_LINES). */
+    private voice = false,
   ) {
     this.root = document.createElement("div");
     this.root.className = "mode-a";
@@ -75,6 +85,7 @@ export class ScrollRenderer implements Renderer {
   }
 
   layout(): void {
+    this.shownY = null;
     this.lineHeightPx = parseFloat(getComputedStyle(this.column).lineHeight) || effectiveFontSize(this.settings) * this.settings.lineHeight;
     this.focus = focusPx(this.stage, this.settings);
     this.column.style.left = `${clampedCenterPx(this.settings.anchorPct, this.stage.clientWidth, this.column.offsetWidth, 16)}px`;
@@ -93,14 +104,25 @@ export class ScrollRenderer implements Renderer {
     // Przyciemnienie poza wierszem odczytu (6.5 pkt 5): nieruchome nakładki.
     const half = this.lineHeightPx / 2;
     this.dimTop.style.height = `${Math.max(0, this.focus - half)}px`;
-    this.dimBottom.style.top = `${this.focus + half}px`;
+    // Przy głosie odsłonięte są też wiersze pod linią odczytu: rozpoznawanie mowy jest opóźnione, więc lektor
+    // zaczyna następny wiersz, zanim tekst się przesunie, i nie może go wtedy czytać spod przyciemnienia.
+    const below = this.voice ? (VOICE_CLEAR_LINES - 1) * this.lineHeightPx : 0;
+    this.dimBottom.style.top = `${this.focus + half + below}px`;
     const marker = this.root.querySelector<HTMLElement>(".reading-line")!;
     marker.style.top = `${this.focus - half}px`;
     marker.style.height = `${this.lineHeightPx}px`;
   }
 
   draw(i: number, p: number): void {
-    const y = scrollY(this.lines, this.schedule, p, this.lineHeightPx);
+    let y: number;
+    if (this.voice) {
+      const now = performance.now();
+      const target = lineStepY(this.lines, this.schedule, p);
+      const dt = this.lastDrawAt === null ? 0 : Math.min(now - this.lastDrawAt, 100);
+      this.shownY = this.shownY === null ? target : easeToward(this.shownY, target, dt, VOICE_STEP_TAU_MS);
+      this.lastDrawAt = now;
+      y = this.shownY;
+    } else y = scrollY(this.lines, this.schedule, p, this.lineHeightPx);
     const offset = columnOffset(this.focus, y, this.lineHeightPx);
     this.column.style.transform = `translate3d(-50%, ${offset}px, 0)`;
     if (i !== this.current) {

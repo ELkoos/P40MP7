@@ -232,7 +232,7 @@ export class Player {
     const view = RecordingController.viewSettings(this.settings);
     this.renderer =
       this.settings.mode === "A"
-        ? new ScrollRenderer(this.stage, this.tokens, this.schedule, view)
+        ? new ScrollRenderer(this.stage, this.tokens, this.schedule, view, this.settings.followVoice && speechSupport().ok)
         : new RsvpRenderer(this.stage, this.tokens, view);
   }
 
